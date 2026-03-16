@@ -166,7 +166,7 @@ Source is the single in-game currency. You earn it by:
 - Walking (+1 every 5 seconds)
 - Killing lions (+7 Source)
 - Killing ghosts (+8 Source)
-- Killing players (+20 Source)
+- Killing players (+All of that player's source)
 - Dying (+3 Source consolation)
 - Killing the Scorched Stag (+400 Source)
 
