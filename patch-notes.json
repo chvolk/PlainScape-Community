@@ -1,0 +1,35 @@
+[
+  {
+    "version": "0.5.0",
+    "date": "2026-03-15",
+    "changes": [
+      "Ghost rework: ghosts now track you with their eyes",
+      "New ghost burst attack — ghosts shake, make a scary face, and rapid-fire two homing shots",
+      "Ghosts periodically phase out while wandering — they become intangible and transparent",
+      "Parried ghost projectiles now home onto nearby enemies",
+      "Gamepad/controller support with configurable bindings (ESC menu)",
+      "Hold right-click to auto-shoot arrows",
+      "Performance improvements: viewport culling, snapshot caching, 15Hz tick rate"
+    ]
+  },
+  {
+    "version": "0.4.0",
+    "date": "2026-03-15",
+    "changes": [
+      "Lion rework: pounces are now dodgeable — lions commit to a direction during windup",
+      "Lions predict your movement and lead their pounces",
+      "New melee swipe attack when lions catch you by running",
+      "Lions scale speed to match your stats — no more outrunning them",
+      "Mobile support: virtual joysticks, touch controls, and landscape mode",
+      "Scorched Stag now rewards 400 Source on kill"
+    ]
+  },
+  {
+    "version": "0.3.0",
+    "date": "2026-03-13",
+    "changes": [
+      "Added interactive signs to the safe zone",
+      "Patch notes, active rules, and admin notices now viewable in-game"
+    ]
+  }
+]
