@@ -1,8 +1,8 @@
 # PlainScape Community Server
 
-**PlainScape** is a real-time multiplayer top-down survival game that runs in your browser. Players explore an infinite world, fight AI enemies, build defenses, and compete for the daily champion title — where the winner gets to add a new rule to the game using AI.
+**PlainScape** is a real-time multiplayer top-down survival game that runs in your browser. Players venture out, fight AI enemies, build defenses, and compete for the daily champion title — where the winner gets to add a new rule to the game using AI.
 
-This package lets you host your own PlainScape server for friends, communities, or LAN parties.
+This package lets you host your own PlainScape server for friends, communities, or LAN parties. Adjust the limits and set your own guard rails! 
 
 ## What is PlainScape?
 
