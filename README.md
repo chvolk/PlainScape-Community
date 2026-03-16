@@ -7,12 +7,12 @@ Host your own PlainScape game server!
 1. Install [Node.js 22+](https://nodejs.org/)
 2. Copy `.env.example` to `.env` and edit your settings
 3. Run `./start.sh` (Linux/Mac) or `start.bat` (Windows)
-4. Open `http://localhost:8080` in your browser
+4. Open `http://localhost:4800` in your browser
 5. To appear in the server browser at plainscape.world, add your Patreon key to `.env`
 
 ## Port Forwarding
 
-For others to connect over the internet, forward your server port (default 8080) in your router settings.
+For others to connect over the internet, forward your server port (default 4800) in your router settings.
 
 ## Admin Commands
 

@@ -2641,7 +2641,8 @@ var World = class {
   }
   tick() {
     const now = Date.now();
-    const delta = (now - this.lastTick) / 1e3;
+    const rawDelta = (now - this.lastTick) / 1e3;
+    const delta = Math.min(rawDelta, TICK_MS * 3 / 1e3);
     this.lastTick = now;
     this.tickCount++;
     tickMovement(this.players, this.enemies, this.chunks, delta);
@@ -3827,10 +3828,14 @@ import { execSync as execSync2 } from "child_process";
 import path2 from "path";
 var PROJECT_ROOT2 = path2.resolve(import.meta.dirname, "../..");
 function ensureCommunityBranches(serverName) {
-  const token = process.env.GITHUB_TOKEN;
+  const token = process.env.COMMUNITY_GITHUB_KEY;
   const repo = process.env.GITHUB_REPO;
-  if (!token || !repo) {
-    console.warn("[CommunityBranches] No GITHUB_TOKEN/GITHUB_REPO \u2014 cannot create branches");
+  if (!token) {
+    console.warn("[CommunityBranches] No COMMUNITY_GITHUB_KEY \u2014 cannot create branches");
+    return false;
+  }
+  if (!repo) {
+    console.warn("[CommunityBranches] No GITHUB_REPO \u2014 cannot create branches");
     return false;
   }
   const safeName = serverName.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").slice(0, 40);
@@ -3875,7 +3880,7 @@ function getCommunityBranchName(serverName) {
 }
 
 // server/src/server.ts
-var PORT = parseInt(process.env.PORT || "8080", 10);
+var PORT = parseInt(process.env.PORT || "4800", 10);
 var IS_MAIN_SERVER = process.env.IS_MAIN_SERVER === "true" && !!process.env.REGISTRY_SECRET;
 var adminUsers = new Set(
   (process.env.ADMIN_USERS || "").split(",").map((s) => s.trim()).filter(Boolean)
@@ -4015,12 +4020,18 @@ function startServer(world2) {
       }
       const ext = path3.extname(resolved);
       let content = data;
-      if (IS_MAIN_SERVER && ext === ".html") {
-        const html = data.toString();
-        content = Buffer.from(html.replace(
-          "</head>",
-          "<script>window.__PLAINSCAPE_MAIN_SERVER__=true;</script></head>"
-        ));
+      if (ext === ".html") {
+        let html = data.toString();
+        const injections = [];
+        if (IS_MAIN_SERVER) injections.push("window.__PLAINSCAPE_MAIN_SERVER__=true;");
+        const srvName = (process.env.SERVER_NAME || "PlainScape").replace(/'/g, "\\'");
+        const srvDesc = (process.env.SERVER_DESCRIPTION || "Survive the plains.").replace(/'/g, "\\'");
+        injections.push(`window.__SERVER_NAME__='${srvName}';`);
+        injections.push(`window.__SERVER_DESC__='${srvDesc}';`);
+        if (injections.length > 0) {
+          html = html.replace("</head>", `<script>${injections.join("")}</script></head>`);
+        }
+        content = Buffer.from(html);
       }
       res.writeHead(200, { "Content-Type": MIME[ext] || "text/plain" });
       res.end(content);
@@ -4101,11 +4112,15 @@ function startServer(world2) {
             player.bedY = bedFoundY;
           }
           world2.addPlayer(player);
+          const serverName = process.env.SERVER_NAME || (IS_MAIN_SERVER ? "PlainScape" : "PlainScape Server");
+          const serverDesc = process.env.SERVER_DESCRIPTION || (IS_MAIN_SERVER ? "Survive the plains." : "");
           const welcome = {
             type: "welcome",
             yourId: player.id,
             serverTime: Date.now(),
-            dayPhase: getDayPhase()
+            dayPhase: getDayPhase(),
+            serverName,
+            serverDescription: serverDesc
           };
           ws.send(JSON.stringify(welcome));
           const leaderboard = computeLeaderboard(world2);
@@ -4882,7 +4897,7 @@ function startHeartbeat(world2) {
   const serverName = process.env.SERVER_NAME || "PlainScape Server";
   const serverDesc = process.env.SERVER_DESCRIPTION || "";
   const serverHost = process.env.SERVER_HOST || "";
-  const port = parseInt(process.env.PORT || "8080", 10);
+  const port = parseInt(process.env.PORT || "4800", 10);
   const maxPlayers = parseInt(process.env.MAX_PLAYERS || String(DEFAULT_MAX_PLAYERS), 10);
   const hasPassword = !!process.env.SERVER_PASSWORD;
   async function sendHeartbeat() {
@@ -4944,6 +4959,25 @@ if (process.env.IS_MAIN_SERVER !== "true") {
   startHeartbeat(world);
 }
 console.log("[PlainScape] Server initialized");
+function shutdown() {
+  console.log("[PlainScape] Shutting down \u2014 flushing state...");
+  for (const [, player] of world.players) {
+    if (player.sourceFlushDirty > 0) {
+      db.addTotalSource(player.token, player.sourceFlushDirty);
+      player.sourceFlushDirty = 0;
+    }
+    db.setStatLevels(player.token, player.statLevels);
+    db.updateLastSeen(player.token, Date.now());
+  }
+  for (const [, b] of world.buildingsById) {
+    db.saveBuilding(b.id, b.btype, b.cellX, b.cellY, b.ownerName, b.hp, b.whitelist);
+  }
+  world.stop();
+  console.log("[PlainScape] Shutdown complete");
+  process.exit(0);
+}
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
 function loadEnv(filePath) {
   try {
     const content = readFileSync(filePath, "utf-8");

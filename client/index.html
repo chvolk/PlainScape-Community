@@ -2047,7 +2047,7 @@
       <p class="subtitle">Survive the plains.</p>
     </div>
     <button id="play-main-btn">PLAY</button>
-    <div class="browser-divider">or browse servers</div>
+    <div class="browser-divider">or browse servers <button id="refresh-servers-btn" style="background:none;border:1px solid rgba(255,255,255,0.15);color:#888;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;margin-left:8px">&#x21BB; Refresh</button></div>
     <div class="server-list-container">
       <table class="server-table">
         <thead>
@@ -2063,6 +2063,9 @@
     <div class="direct-connect">
       <input type="text" id="direct-ip" placeholder="Connect by IP:Port">
       <button id="direct-connect-btn">Connect</button>
+    </div>
+    <div style="margin-top:16px">
+      <script type="text/javascript" src="https://cdnjs.buymeacoffee.com/1.0.0/button.prod.min.js" data-name="bmc-button" data-slug="PlainScape" data-color="#40DCA5" data-emoji="" data-font="Poppins" data-text="Buy me a coffee" data-outline-color="#000000" data-font-color="#ffffff" data-coffee-color="#FFDD00"></script>
     </div>
   </div>
 
@@ -2090,6 +2093,7 @@
       </div>
       <button id="play-btn">PLAY</button>
       <button class="htp-btn" onclick="document.getElementById('htp-modal').classList.add('open')">How to Play</button>
+      <button class="htp-btn" id="back-to-browser" style="display:none">Server Browser</button>
       <div class="error-msg" id="error-msg"></div>
     </div>
   </div>

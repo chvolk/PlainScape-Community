@@ -1048,6 +1048,9 @@ var GameState = class {
   selfRespawnAt = null;
   selfColors = null;
   selfUsername = "";
+  // Server info (from welcome message)
+  serverName = "PlainScape";
+  serverDescription = "Survive the plains.";
   selfFacing = 0;
   selfAnim = "idle";
   selfShieldActive = false;
@@ -1131,17 +1134,23 @@ var GameState = class {
     const dt = this.currSnapshot.time - this.prevSnapshot.time;
     if (dt <= 0) return { x: curr.x, y: curr.y };
     const elapsed = Date.now() - this.snapshotTime;
-    const t = Math.min(elapsed / dt, 1.5);
+    const t = Math.min(elapsed / dt, 1.1);
     return {
       x: prev.x + (curr.x - prev.x) * t,
       y: prev.y + (curr.y - prev.y) * t
     };
   }
+  lastCameraTime = 0;
   updateCamera() {
-    this.selfPos.x += (this.selfTargetPos.x - this.selfPos.x) * 0.2;
-    this.selfPos.y += (this.selfTargetPos.y - this.selfPos.y) * 0.2;
-    this.cameraX += (this.selfPos.x - this.cameraX) * 0.2;
-    this.cameraY += (this.selfPos.y - this.cameraY) * 0.2;
+    const now = performance.now();
+    const dt = this.lastCameraTime > 0 ? Math.min((now - this.lastCameraTime) / 1e3, 0.05) : 1 / 60;
+    this.lastCameraTime = now;
+    const posSmooth = 1 - Math.exp(-12 * dt);
+    const camSmooth = 1 - Math.exp(-10 * dt);
+    this.selfPos.x += (this.selfTargetPos.x - this.selfPos.x) * posSmooth;
+    this.selfPos.y += (this.selfTargetPos.y - this.selfPos.y) * posSmooth;
+    this.cameraX += (this.selfPos.x - this.cameraX) * camSmooth;
+    this.cameraY += (this.selfPos.y - this.cameraY) * camSmooth;
   }
 };
 
@@ -3208,7 +3217,7 @@ var Renderer = class {
   particles = [];
   constructor(canvas, state2, input2) {
     this.canvas = canvas;
-    this.ctx = canvas.getContext("2d", { alpha: false });
+    this.ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
     this.state = state2;
     this.input = input2;
     this.resize();
@@ -4758,18 +4767,20 @@ function setupServerBrowser(onServerSelected) {
     });
   }
   if (directBtn && directInput) {
-    directBtn.addEventListener("click", () => {
+    const doDirectConnect = () => {
       const value = directInput.value.trim();
-      if (value) {
-        onSelect?.(value);
-      }
-    });
+      if (!value) return;
+      const url = value.startsWith("http://") || value.startsWith("https://") ? value : `http://${value}`;
+      openCommunityServer(url);
+    };
+    directBtn.addEventListener("click", doDirectConnect);
     directInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        const value = directInput.value.trim();
-        if (value) onSelect?.(value);
-      }
+      if (e.key === "Enter") doDirectConnect();
     });
+  }
+  const refreshBtn = document.getElementById("refresh-servers-btn");
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", fetchServers);
   }
   fetchServers();
   refreshInterval = setInterval(fetchServers, 1e4);
@@ -4784,6 +4795,9 @@ async function fetchServers() {
     renderServerList(servers);
   } catch {
   }
+}
+function openCommunityServer(url) {
+  window.location.href = url;
 }
 function renderServerList(servers) {
   const tbody = document.getElementById("server-rows");
@@ -4806,13 +4820,12 @@ function renderServerList(servers) {
     descCell.textContent = server.description;
     row.appendChild(descCell);
     row.addEventListener("click", () => {
-      if (server.hasPassword) {
-        const password = prompt("Enter server password:");
-        if (password === null) return;
-        window.__serverPassword = password;
+      const isMainServer2 = server.host === window.location.hostname || server.host === "localhost" || server.host === "127.0.0.1" || server.name.includes("Official");
+      if (isMainServer2) {
+        onSelect?.(null);
+      } else {
+        openCommunityServer(`http://${server.host}:${server.port}`);
       }
-      const url = `${server.host}:${server.port}`;
-      onSelect?.(url);
     });
     tbody.appendChild(row);
   }
@@ -4836,6 +4849,10 @@ function handleMessage(msg) {
   switch (msg.type) {
     case "welcome": {
       state.myId = msg.yourId;
+      if (msg.serverName) state.serverName = msg.serverName;
+      if (msg.serverDescription) state.serverDescription = msg.serverDescription;
+      const menuTitle = document.querySelector("#esc-menu .menu-panel h2");
+      if (menuTitle) menuTitle.textContent = state.serverName;
       hideJoinScreen();
       startGameLoop();
       startChampionTimer();
@@ -5409,8 +5426,41 @@ var selectedServerUrl;
 function startLobbyFlow(serverUrl) {
   selectedServerUrl = serverUrl;
   conn = new Connection(handleMessage, serverUrl);
+  const srvName = window.__SERVER_NAME__;
+  const srvDesc = window.__SERVER_DESC__;
+  const subtitleEl = document.querySelector("#join-screen .subtitle");
+  if (subtitleEl && srvDesc) {
+    subtitleEl.textContent = srvDesc;
+  }
+  if (srvName && srvName !== "PlainScape") {
+    const existing = document.getElementById("server-name-label");
+    if (!existing) {
+      const nameEl = document.createElement("p");
+      nameEl.id = "server-name-label";
+      nameEl.style.cssText = "color:#f0c040;font-size:13px;margin-top:4px;";
+      nameEl.textContent = srvName;
+      subtitleEl?.parentElement?.appendChild(nameEl);
+    }
+  }
   const joinScreen = document.getElementById("join-screen");
   if (joinScreen) joinScreen.style.display = "flex";
+  const backBtn = document.getElementById("back-to-browser");
+  if (backBtn) {
+    backBtn.style.display = "";
+    if (isMainServer) {
+      backBtn.textContent = "Server Browser";
+      backBtn.onclick = () => {
+        if (joinScreen) joinScreen.style.display = "none";
+        const browserEl = document.getElementById("server-browser");
+        if (browserEl) browserEl.style.display = "flex";
+      };
+    } else {
+      backBtn.textContent = "Browse Servers";
+      backBtn.onclick = () => {
+        window.location.href = "https://plainscape.world";
+      };
+    }
+  }
   setupLobby(async (data) => {
     try {
       await conn.connect();
