@@ -23,6 +23,8 @@
   <meta name="theme-color" content="#7ec87e">
 
   <link rel="icon" type="image/png" href="/logo.png">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/logo.png">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -1932,15 +1934,30 @@
       align-items: center;
       justify-content: center;
       height: 100vh;
-      gap: 16px;
-      padding: 20px;
+      gap: 12px;
+      padding: 16px 20px;
+      overflow-y: auto;
     }
     #server-browser .logo-lockup { gap: 8px; }
+    #server-browser .logo-lockup img {
+      width: 96px;
+      height: 96px;
+      filter: drop-shadow(0 0 24px rgba(76, 155, 76, 0.4));
+    }
     #server-browser h1 {
       font-size: 48px;
       color: #7ec87e;
       text-shadow: 0 0 20px rgba(126,200,126,0.3);
       letter-spacing: 4px;
+    }
+    /* Compact server browser on short viewports (landscape mobile) */
+    @media (max-height: 500px) {
+      #server-browser { gap: 6px; padding: 8px 12px; justify-content: flex-start; }
+      #server-browser .logo-lockup { display: none; }
+      #server-browser h1 { font-size: 22px; margin-bottom: 0; }
+      #play-main-btn { padding: 10px 32px; font-size: 16px; }
+      .server-list-container { max-height: 40vh; }
+      .browser-divider { margin: 0; }
     }
     #play-main-btn {
       background: #7ec87e;
@@ -2037,6 +2054,20 @@
     }
     .direct-connect button:hover { background: rgba(255,255,255,0.2); }
   </style>
+  <script>
+    // Set mobile class before first paint to prevent desktop→mobile flash
+    if (navigator.maxTouchPoints > 0) {
+      document.documentElement.classList.add('mobile');
+      document.addEventListener('DOMContentLoaded', function() { document.body.classList.add('mobile'); });
+    }
+    // Auto-fullscreen when opened as installed PWA
+    if (window.matchMedia('(display-mode: standalone)').matches || navigator.standalone) {
+      document.addEventListener('click', function goFS() {
+        document.documentElement.requestFullscreen().catch(function(){});
+        document.removeEventListener('click', goFS);
+      }, { once: true });
+    }
+  </script>
 </head>
 <body>
   <!-- Server Browser (main server only, injected via IS_MAIN_SERVER) -->
@@ -2044,7 +2075,7 @@
     <div class="logo-lockup">
       <img src="/logo.png" alt="PlainScape">
       <h1>PLAINSCAPE</h1>
-      <p class="subtitle">Survive the plains.</p>
+      <p class="subtitle">Survive the plains. Change the plains.</p>
     </div>
     <button id="play-main-btn">PLAY</button>
     <div class="browser-divider">or browse servers <button id="refresh-servers-btn" style="background:none;border:1px solid rgba(255,255,255,0.15);color:#888;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;margin-left:8px">&#x21BB; Refresh</button></div>
@@ -2064,7 +2095,17 @@
       <input type="text" id="direct-ip" placeholder="Connect by IP:Port">
       <button id="direct-connect-btn">Connect</button>
     </div>
-    <div style="margin-top:16px">
+    <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;justify-content:center">
+      <a href="https://github.com/chvolk/PlainScape-Community/releases" target="_blank" style="display:flex;align-items:center;gap:6px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:#eee;padding:8px 16px;border-radius:8px;text-decoration:none;font-size:13px;transition:background 0.2s">
+        <svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        Host a Server
+      </a>
+      <a href="https://www.patreon.com/c/PlainScape" target="_blank" style="display:flex;align-items:center;gap:6px;background:rgba(255,100,70,0.15);border:1px solid rgba(255,100,70,0.3);color:#ff6346;padding:8px 16px;border-radius:8px;text-decoration:none;font-size:13px;transition:background 0.2s">
+        <svg height="16" width="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14.82 2.41c3.96 0 7.18 3.24 7.18 7.21 0 3.96-3.22 7.18-7.18 7.18-3.97 0-7.21-3.22-7.21-7.18 0-3.97 3.24-7.21 7.21-7.21zM2 21.6h3.5V2.41H2V21.6z"/></svg>
+        Get Listed — Become a Patron
+      </a>
+    </div>
+    <div style="margin-top:10px">
       <script type="text/javascript" src="https://cdnjs.buymeacoffee.com/1.0.0/button.prod.min.js" data-name="bmc-button" data-slug="PlainScape" data-color="#40DCA5" data-emoji="" data-font="Poppins" data-text="Buy me a coffee" data-outline-color="#000000" data-font-color="#ffffff" data-coffee-color="#FFDD00"></script>
     </div>
   </div>
@@ -2074,7 +2115,7 @@
     <div class="logo-lockup">
       <img src="/logo.png" alt="PlainScape">
       <h1>PLAINSCAPE</h1>
-      <p class="subtitle">Survive the plains.</p>
+      <p class="subtitle">Survive the plains. Change the plains.</p>
     </div>
     <div class="join-form">
       <input type="text" id="username" placeholder="Enter username" maxlength="20" autofocus>
@@ -2523,5 +2564,6 @@
   </div>
 
   <script type="module" src="game.js"></script>
+  <script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});</script>
 </body>
 </html>

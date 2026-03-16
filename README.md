@@ -1,8 +1,8 @@
 # PlainScape Community Server
 
-**PlainScape** is a real-time multiplayer top-down survival game that runs in your browser. Players venture out, fight AI enemies, build defenses, and compete for the daily champion title — where the winner gets to add a new rule to the game using AI.
+**PlainScape** is a real-time multiplayer top-down survival game that runs in your browser. Players explore an infinite world, fight AI enemies, build defenses, and compete for the daily champion title — where the winner gets to add a new rule to the game using AI.
 
-This package lets you host your own PlainScape server for friends, communities, or LAN parties. Adjust the limits and set your own guard rails! 
+This package lets you host your own PlainScape server for friends, communities, or LAN parties.
 
 ## What is PlainScape?
 
@@ -12,7 +12,17 @@ This package lets you host your own PlainScape server for friends, communities, 
 - **Change the game** — The daily champion gets to add a new rule to the game. Rules are implemented by Claude AI and can change anything — new enemies, balance tweaks, fun mechanics.
 - **Party up** — Form parties to share Source and show allies on the minimap.
 
-## Quick Start
+## Install as App
+
+PlainScape can be installed as a Progressive Web App (PWA) for a native app experience:
+
+- **Desktop (Chrome/Edge)**: Click the install icon in the address bar → adds to desktop, opens fullscreen
+- **Android**: Chrome menu → "Add to Home Screen" → launches like a native app
+- **iOS**: Safari share → "Add to Home Screen" → app icon on home screen
+
+When opened from the installed shortcut, the game automatically enters fullscreen mode.
+
+## Quick Start (Hosting a Server)
 
 ### Requirements
 - [Node.js 22+](https://nodejs.org/) (LTS recommended)
@@ -166,7 +176,7 @@ Source is the single in-game currency. You earn it by:
 - Walking (+1 every 5 seconds)
 - Killing lions (+7 Source)
 - Killing ghosts (+8 Source)
-- Killing players (+All of that player's source)
+- Killing players (+20 Source)
 - Dying (+3 Source consolation)
 - Killing the Scorched Stag (+400 Source)
 
