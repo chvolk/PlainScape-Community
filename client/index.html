@@ -82,7 +82,8 @@
       border-radius: 12px;
       border: 1px solid rgba(255,255,255,0.1);
     }
-    .join-form input[type="text"] {
+    .join-form input[type="text"],
+    .join-form input[type="password"] {
       background: rgba(255,255,255,0.1);
       border: 1px solid rgba(255,255,255,0.2);
       color: #fff;
@@ -95,26 +96,72 @@
       -webkit-user-select: text;
       user-select: text;
     }
-    .join-form input[type="text"]:focus {
+    .join-form input[type="text"]:focus,
+    .join-form input[type="password"]:focus {
       border-color: #7ec87e;
     }
     .color-row {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 8px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 6px;
+      padding: 4px 10px;
+      cursor: pointer;
+      transition: all 0.2s;
     }
-    .color-row label {
-      width: 60px;
-      font-size: 14px;
+    .color-row:hover {
+      background: rgba(255,255,255,0.1);
+      border-color: rgba(255,255,255,0.2);
+    }
+    .color-row span {
+      font-size: 13px;
       color: #aaa;
+      flex: 1;
     }
     .color-row input[type="color"] {
-      width: 48px;
-      height: 32px;
+      width: 36px;
+      height: 24px;
       border: none;
       border-radius: 4px;
       cursor: pointer;
       background: none;
+      padding: 0;
+    }
+    .color-picker-row {
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+      gap: 16px;
+    }
+    .color-pickers {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex: 1;
+      max-width: 130px;
+    }
+    #randomize-btn {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: #7a7a7a;
+      flex: 1;
+      max-width: 130px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+    #randomize-btn:hover {
+      background: rgba(126,200,126,0.12);
+      border-color: rgba(126,200,126,0.35);
+      color: #7ec87e;
+    }
+    #randomize-btn:active {
+      transform: scale(0.95);
     }
     .preview-char {
       width: 80px;
@@ -300,17 +347,26 @@
       background: rgba(0,0,0,0.5);
       border: 1px solid rgba(255,255,255,0.1);
       border-radius: 8px;
-      padding: 10px 14px;
       width: 190px;
-      pointer-events: none;
+      pointer-events: auto;
     }
-    #leaderboard h3 {
-      font-size: 12px;
+    #leaderboard .notif-card-header {
+      padding: 8px 14px;
+    }
+    #leaderboard .notif-card-header span:first-child {
       color: #f0c040;
+      font-size: 12px;
+      font-weight: bold;
       text-transform: uppercase;
       letter-spacing: 1px;
-      margin-bottom: 6px;
     }
+    #lb-entries, #champion-timer {
+      padding: 0 14px;
+    }
+    #lb-entries { padding-top: 0; padding-bottom: 4px; }
+    #champion-timer { padding-bottom: 10px; }
+    #leaderboard.collapsed #lb-entries,
+    #leaderboard.collapsed #champion-timer { display: none; }
     #champion-timer {
       font-size: 10px;
       color: #999;
@@ -372,6 +428,7 @@
       padding: 1px 0;
     }
     .online-name.online-self { color: #7ec87e; }
+    .online-admin { color: #f0c040; font-size: 9px; font-weight: bold; }
 
     /* ── Build Bar ────────────────────────────────────── */
     .build-bar {
@@ -490,6 +547,7 @@
     .notif-kill { color: #f0c040; }
     .notif-local { color: #ccc; }
     .notif-party { color: #4488ff; }
+    .notif-phase { color: #ffb347; font-style: italic; }
     .notif-rule { color: #f0c040; font-weight: bold; }
 
     /* ── Rule Status Indicator ───────────────────────── */
@@ -563,6 +621,9 @@
       padding: 1px 0;
     }
     .chat-msg .chat-name { color: #7ec87e; font-weight: bold; }
+    .chat-msg.chat-whisper { color: #d8a0f0; font-style: italic; }
+    .chat-msg.chat-whisper .chat-name { color: #c77dff; }
+    .chat-whisper-label { color: #c77dff; font-style: italic; }
     .chat-msg.chat-history {
       opacity: 0.8;
     }
@@ -823,6 +884,19 @@
       font-size: 13px;
     }
     .controller-close:hover { background: rgba(255,255,255,0.2); }
+
+    /* ── Gamepad Menu Navigation ─────────────────────── */
+    .gp-focus {
+      outline: 2px solid #f0c040 !important;
+      outline-offset: 2px;
+      background: rgba(240, 192, 64, 0.15) !important;
+      border-radius: 4px;
+    }
+    /* Input fields get a subtler highlight */
+    input.gp-focus {
+      outline: 2px solid #4a9eff !important;
+      background: rgba(74, 158, 255, 0.1) !important;
+    }
 
     /* ── How to Play ──────────────────────────────────── */
     .htp-btn {
@@ -1524,9 +1598,9 @@
     }
     .mobile .join-form input[type="text"] { width: 100%; padding: 8px 12px; font-size: 14px; }
     .mobile .preview-char { width: 40px; height: 52px; margin: 0 auto; }
-    .mobile .color-row { gap: 6px; }
-    .mobile .color-row label { width: 40px; font-size: 11px; }
-    .mobile .color-row input[type="color"] { width: 36px; height: 26px; }
+    .mobile .color-row { gap: 6px; padding: 3px 8px; }
+    .mobile .color-row span { font-size: 11px; }
+    .mobile .color-row input[type="color"] { width: 30px; height: 22px; }
     .mobile #play-btn { padding: 10px 20px; font-size: 15px; }
     .mobile .htp-btn { font-size: 11px; padding: 6px 16px; }
     .mobile .error-msg { font-size: 11px; min-height: 14px; }
@@ -1638,6 +1712,7 @@
     .mobile-feed-strip-msg .chat-name { color: #7ec87e; font-weight: bold; }
     .mobile-feed-notif { color: #aaa; }
     .mobile-feed-notif.notif-kill { color: #f0c040; }
+    .mobile-feed-notif.notif-phase { color: #ffb347; font-style: italic; }
     .mobile-feed-notif.notif-death { color: #e55; }
     .mobile-feed-notif.notif-party { color: #4488ff; }
     .mobile-feed-notif.notif-source { color: #7ec87e; }
@@ -1897,6 +1972,23 @@
       z-index: 20;
       touch-action: manipulation;
     }
+    #mobile-build-label {
+      display: none;
+      position: absolute;
+      bottom: 120px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.6);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 6px;
+      padding: 6px 14px;
+      color: #f0c040;
+      font-size: 13px;
+      font-weight: bold;
+      text-align: center;
+      z-index: 25;
+      pointer-events: none;
+    }
     #mobile-build-toggle:active { background: rgba(255,255,255,0.15); }
     #mobile-build-toggle.active {
       border-color: #7ec87e;
@@ -1950,14 +2042,66 @@
       text-shadow: 0 0 20px rgba(126,200,126,0.3);
       letter-spacing: 4px;
     }
+    /* Fullscreen toggle button */
+    .fullscreen-btn {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      z-index: 9999;
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: rgba(255,255,255,0.4);
+      border-radius: 6px;
+      width: 32px;
+      height: 32px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 0.15s, background 0.15s;
+      padding: 0;
+    }
+    .fullscreen-btn:hover { color: rgba(255,255,255,0.8); background: rgba(255,255,255,0.12); }
+    @media (max-width: 768px), (max-height: 500px) {
+      .fullscreen-btn { right: auto; left: 10px; }
+    }
+
+    /* Hide columns on narrow portrait screens */
+    @media (max-width: 560px) {
+      .server-table th:nth-child(4),
+      .server-table td:nth-child(4),
+      .server-table th:nth-child(5),
+      .server-table td:nth-child(5),
+      .server-table th:nth-child(6),
+      .server-table td:nth-child(6) { display: none; }
+      .server-table th, .server-table td { padding: 8px 8px; }
+      .server-list-container { max-width: 100%; }
+      .browser-divider, .direct-connect { max-width: 100%; }
+    }
+
     /* Compact server browser on short viewports (landscape mobile) */
     @media (max-height: 500px) {
-      #server-browser { gap: 6px; padding: 8px 12px; justify-content: flex-start; }
-      #server-browser .logo-lockup { display: none; }
-      #server-browser h1 { font-size: 22px; margin-bottom: 0; }
-      #play-main-btn { padding: 10px 32px; font-size: 16px; }
-      .server-list-container { max-height: 40vh; }
-      .browser-divider { margin: 0; }
+      #server-browser { gap: 0; padding: 4px 12px; justify-content: flex-start; overflow-y: auto; }
+      /* Combine logo + PLAY into one horizontal bar */
+      #server-browser .logo-lockup { flex-direction: row; gap: 8px; align-items: center; margin-bottom: 2px; }
+      #server-browser .logo-lockup img { width: 24px; height: 24px; animation: none; }
+      #server-browser h1 { font-size: 16px; margin-bottom: 0; letter-spacing: 2px; }
+      #server-browser .subtitle { display: none; }
+      #play-main-btn { padding: 5px 20px; font-size: 13px; border-radius: 6px; }
+      .browser-divider { margin: 0; font-size: 11px; gap: 8px; }
+      .server-list-container { max-height: none; overflow-y: visible; }
+      .server-table th { padding: 3px 6px; font-size: 10px; }
+      .server-row td { padding: 3px 6px; font-size: 11px; }
+      .direct-connect { display: none; }
+      #server-browser > div[style*="flex"] { display: none !important; }
+      #server-browser > div[style*="margin-top:10px"] { display: none !important; }
+      /* Hide Mods, Ping, Description in landscape too */
+      .server-table th:nth-child(4),
+      .server-table td:nth-child(4),
+      .server-table th:nth-child(5),
+      .server-table td:nth-child(5),
+      .server-table th:nth-child(6),
+      .server-table td:nth-child(6) { display: none; }
     }
     #play-main-btn {
       background: #7ec87e;
@@ -1980,6 +2124,32 @@
       max-width: 700px;
       color: #555;
       font-size: 12px;
+    }
+    .refresh-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: rgba(126, 200, 126, 0.1);
+      border: 1px solid rgba(126, 200, 126, 0.25);
+      color: #7ec87e;
+      border-radius: 6px;
+      padding: 4px 12px;
+      cursor: pointer;
+      font-size: 12px;
+      font-family: inherit;
+      transition: background 0.15s, border-color 0.15s, transform 0.15s;
+    }
+    .refresh-btn:hover {
+      background: rgba(126, 200, 126, 0.2);
+      border-color: rgba(126, 200, 126, 0.4);
+    }
+    .refresh-btn:active { transform: scale(0.95); }
+    .refresh-btn.spinning .refresh-icon {
+      animation: spin 0.6s cubic-bezier(0.25, 1, 0.5, 1);
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
     }
     .browser-divider::before, .browser-divider::after {
       content: '';
@@ -2067,9 +2237,38 @@
         document.removeEventListener('click', goFS);
       }, { once: true });
     }
+    // Fullscreen toggle button
+    document.addEventListener('DOMContentLoaded', function() {
+      var fsBtn = document.getElementById('fullscreen-btn');
+      if (fsBtn) {
+        fsBtn.addEventListener('click', function() {
+          if (document.fullscreenElement) {
+            document.exitFullscreen().catch(function(){});
+          } else {
+            document.documentElement.requestFullscreen().catch(function(){});
+          }
+        });
+        // Hide button if fullscreen API not available
+        if (!document.documentElement.requestFullscreen) fsBtn.style.display = 'none';
+        // Hide during gameplay (canvas handles its own fullscreen)
+        document.addEventListener('fullscreenchange', function() {
+          fsBtn.style.opacity = document.fullscreenElement ? '0.3' : '1';
+        });
+      }
+    });
   </script>
 </head>
 <body>
+  <!-- Fullscreen toggle -->
+  <button class="fullscreen-btn" id="fullscreen-btn" title="Toggle fullscreen">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="15 3 21 3 21 9"></polyline>
+      <polyline points="9 21 3 21 3 15"></polyline>
+      <line x1="21" y1="3" x2="14" y2="10"></line>
+      <line x1="3" y1="21" x2="10" y2="14"></line>
+    </svg>
+  </button>
+
   <!-- Server Browser (main server only, injected via IS_MAIN_SERVER) -->
   <div id="server-browser">
     <div class="logo-lockup">
@@ -2078,13 +2277,21 @@
       <p class="subtitle">Survive the plains. Change the plains.</p>
     </div>
     <button id="play-main-btn">PLAY</button>
-    <div class="browser-divider">or browse servers <button id="refresh-servers-btn" style="background:none;border:1px solid rgba(255,255,255,0.15);color:#888;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;margin-left:8px">&#x21BB; Refresh</button></div>
+    <div class="browser-divider">or browse servers <button id="refresh-servers-btn" class="refresh-btn">
+      <svg class="refresh-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="23 4 23 10 17 10"></polyline>
+        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+      </svg>
+      Refresh</button></div>
     <div class="server-list-container">
       <table class="server-table">
         <thead>
           <tr>
             <th>Server</th>
             <th>Players</th>
+            <th style="text-align:center">🔒</th>
+            <th style="text-align:center">Mods</th>
+            <th style="text-align:center">Ping</th>
             <th>Description</th>
           </tr>
         </thead>
@@ -2120,18 +2327,32 @@
     <div class="join-form">
       <input type="text" id="username" placeholder="Enter username" maxlength="20" autofocus>
       <canvas id="char-preview" class="preview-char" width="80" height="100"></canvas>
-      <div class="color-row">
-        <label>Skin</label>
-        <input type="color" id="skin-color" value="#e0ac69">
+      <div class="color-picker-row">
+        <div class="color-pickers">
+          <label class="color-row">
+            <span>Skin</span>
+            <input type="color" id="skin-color" value="#e0ac69">
+          </label>
+          <label class="color-row">
+            <span>Shirt</span>
+            <input type="color" id="shirt-color" value="#3b82f6">
+          </label>
+          <label class="color-row">
+            <span>Pants</span>
+            <input type="color" id="pants-color" value="#1e3a5f">
+          </label>
+        </div>
+        <button type="button" id="randomize-btn" title="Randomize colors">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="16 3 21 3 21 8"></polyline>
+            <line x1="4" y1="20" x2="21" y2="3"></line>
+            <polyline points="21 16 21 21 16 21"></polyline>
+            <line x1="15" y1="15" x2="21" y2="21"></line>
+            <line x1="4" y1="4" x2="9" y2="9"></line>
+          </svg>
+        </button>
       </div>
-      <div class="color-row">
-        <label>Shirt</label>
-        <input type="color" id="shirt-color" value="#3b82f6">
-      </div>
-      <div class="color-row">
-        <label>Pants</label>
-        <input type="color" id="pants-color" value="#1e3a5f">
-      </div>
+      <input type="password" id="server-password" placeholder="Server password" style="display:none">
       <button id="play-btn">PLAY</button>
       <button class="htp-btn" onclick="document.getElementById('htp-modal').classList.add('open')">How to Play</button>
       <button class="htp-btn" id="back-to-browser" style="display:none">Server Browser</button>
@@ -2176,7 +2397,10 @@
     <button id="stats-btn">Stats</button>
 
     <div id="leaderboard">
-      <h3>Top Source</h3>
+      <div class="notif-card-header" id="lb-toggle">
+        <span>Top Source</span>
+        <span class="notif-card-toggle" id="lb-toggle-icon">&#x25BC;</span>
+      </div>
       <div id="lb-entries"></div>
       <div id="champion-timer"></div>
     </div>
@@ -2242,8 +2466,8 @@
           <tr><td>Right Click</td><td>Shoot arrow</td></tr>
           <tr><td>F</td><td>Parry (reflects melee &amp; projectiles)</td></tr>
           <tr><td>Space</td><td>Dash (quick dodge in movement direction)</td></tr>
-          <tr><td>Q (hold)</td><td>Shield (2s duration, 12s cooldown)</td></tr>
-          <tr><td>1-4</td><td>Build (Wall / Gate / Turret / Bed)</td></tr>
+          <tr><td>Q</td><td>Shield (2s duration, 12s cooldown)</td></tr>
+          <tr><td>1-4</td><td>Build (Wall / Gate / Turret / Bed, same key twice to dismiss)</td></tr>
           <tr><td>Ctrl + Click</td><td>Party invite (player) / Edit whitelist (gate/turret)</td></tr>
           <tr><td>Enter</td><td>Open chat</td></tr>
           <tr><td>ESC</td><td>Open/close this menu</td></tr>
@@ -2386,7 +2610,7 @@
           <button id="pick-suggestion">Adopt This Suggestion</button>
         </div>
         <p style="font-size:12px;color:#888;margin-bottom:8px">Or write your own rule (you will be sacrificed):</p>
-        <textarea id="rule-input" placeholder="Describe the rule or game element you want to add..."></textarea>
+        <textarea id="rule-input" placeholder="Describe a game mechanic, enemy, effect, or change to add... (must be gameplay-related)"></textarea>
         <br>
         <button id="submit-rule">Submit Rule</button>
         <div class="winner-status" id="winner-status"></div>
@@ -2441,6 +2665,9 @@
     <!-- Mobile: Interact button (appears near interactables) -->
     <button id="mobile-interact-btn" style="display:none">INTERACT</button>
 
+    <!-- Mobile: Build placement text -->
+    <div id="mobile-build-label"></div>
+
     <!-- Mobile: Build toggle + tray -->
     <button id="mobile-build-toggle" style="display:none">BUILD</button>
     <div id="mobile-build-tray">
@@ -2466,8 +2693,8 @@
         <tr><td>Right Click</td><td>Shoot arrow</td></tr>
         <tr><td>F</td><td>Parry &mdash; tight window, reflects melee damage and projectiles back</td></tr>
         <tr><td>Space</td><td>Dash &mdash; quick dodge in movement direction</td></tr>
-        <tr><td>Q (hold)</td><td>Shield &mdash; blocks all damage briefly</td></tr>
-        <tr><td>1 &ndash; 4</td><td>Select building (Wall / Gate / Turret / Bed)</td></tr>
+        <tr><td>Q</td><td>Shield &mdash; blocks all damage briefly</td></tr>
+        <tr><td>1 &ndash; 4</td><td>Select building (Wall / Gate / Turret / Bed, same key twice to dismiss)</td></tr>
         <tr><td>Click (building)</td><td>Place selected building on the grid</td></tr>
         <tr><td>Ctrl + Click</td><td>Party invite (on player) / Edit whitelist (on your gate or turret)</td></tr>
         <tr><td>Enter</td><td>Open chat</td></tr>

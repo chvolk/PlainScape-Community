@@ -58,6 +58,84 @@ var Connection = class {
   }
 };
 
+// packages/shared/src/constants.ts
+var TICK_RATE = 15;
+var TICK_MS = 1e3 / TICK_RATE;
+var CELL_SIZE = 32;
+var SAFE_ZONE_RADIUS = 1300;
+var VIEW_RADIUS = 1600;
+var PLAYER_SIZE = 20;
+var PUNCH_RANGE = 52;
+var PUNCH_COOLDOWN = 900;
+var PUNCH_ARC = Math.PI / 2;
+var LUNGE_AOE_RADIUS = 48;
+var LUNGE_COOLDOWN = 2e3;
+var SHIELD_COOLDOWN = 12e3;
+var PARRY_COOLDOWN = 3e3;
+var ARROW_COOLDOWN = 1e3;
+var LION_SWIPE_ARC = Math.PI / 2;
+var DASH_COOLDOWN = 1800;
+var PROJECTILE_SIZE = 6;
+var NO_BUILD_BUFFER = 130;
+var WALL_COST = 10;
+var GATE_COST = 15;
+var TURRET_COST = 80;
+var BED_COST = 20;
+var MAX_BUILDINGS_PER_PLAYER = 100;
+var MAX_BUILD_RANGE = 5 * CELL_SIZE;
+var BED_HEAL_RADIUS = 80;
+var BANK_NPC_RANGE = 80;
+var VOTE_COST = 50;
+var SCRIBE_NPC_RANGE = 80;
+var BANKER_POS = { x: 120, y: -60 };
+var SCRIBE_POS = { x: -120, y: -60 };
+var STAT_LEVEL_COST = 100;
+var STAT_MAX_LEVEL = 25;
+var STAT_NAMES = [
+  "moveSpeed",
+  "meleeCooldown",
+  "meleeRange",
+  "projectileSpeed",
+  "projectileTtl",
+  "lungeAoe",
+  "lungeDist",
+  "shieldDuration",
+  "knockback",
+  "dashDist"
+];
+var STAT_DISPLAY_NAMES = {
+  moveSpeed: "Move Speed",
+  meleeCooldown: "Melee Speed",
+  meleeRange: "Melee Range",
+  projectileSpeed: "Projectile Speed",
+  projectileTtl: "Projectile Range",
+  lungeAoe: "Lunge AOE",
+  lungeDist: "Lunge Distance",
+  shieldDuration: "Shield Duration",
+  knockback: "Knockback",
+  dashDist: "Dash Distance"
+};
+var SIGN_RANGE = 80;
+var PATCH_NOTES_SIGN_POS = { x: 180, y: 126 };
+var RULES_SIGN_POS = { x: -180, y: 126 };
+var NOTICES_SIGN_POS = { x: 0, y: 236 };
+
+// packages/shared/src/types.ts
+function defaultStatLevels() {
+  return {
+    moveSpeed: 0,
+    meleeCooldown: 0,
+    meleeRange: 0,
+    projectileSpeed: 0,
+    projectileTtl: 0,
+    lungeAoe: 0,
+    lungeDist: 0,
+    shieldDuration: 0,
+    knockback: 0,
+    dashDist: 0
+  };
+}
+
 // client/src/TouchController.ts
 var LEFT_STICK_RADIUS = 42;
 var RIGHT_STICK_RADIUS = 42;
@@ -373,6 +451,8 @@ var DEFAULT_BINDINGS = {
   // Select / Share
   autorun: { type: "button", index: 10 },
   // L3 (left stick click)
+  target_lock: { type: "button", index: 11 },
+  // R3 (right stick click)
   build_wall: { type: "button", index: 12 },
   // D-pad Up
   build_gate: { type: "button", index: 15 },
@@ -396,6 +476,7 @@ var ACTION_LABELS = {
   menu: "Menu",
   scores: "Scores / Online",
   autorun: "Auto-run",
+  target_lock: "Target Lock (Invite/Whitelist)",
   build_wall: "Build Wall",
   build_gate: "Build Gate",
   build_turret: "Build Turret",
@@ -412,9 +493,14 @@ var GamepadController = class _GamepadController {
   moveDx = 0;
   moveDy = 0;
   aimFacing = NaN;
+  // Raw right stick values (for build cursor movement)
+  aimRawX = 0;
+  aimRawY = 0;
   lastAimFacing = 0;
   // retain last aim when stick released
-  enabled = true;
+  lastMoveFacing = 0;
+  // retain last move direction when stick released
+  enabled = false;
   connected = false;
   // Action callbacks (set by InputHandler)
   onAction = null;
@@ -480,9 +566,15 @@ var GamepadController = class _GamepadController {
     const ly = gp.axes[1] ?? 0;
     this.moveDx = Math.abs(lx) > STICK_DEADZONE2 ? lx > 0 ? 1 : -1 : 0;
     this.moveDy = Math.abs(ly) > STICK_DEADZONE2 ? ly > 0 ? 1 : -1 : 0;
+    if (this.moveDx !== 0 || this.moveDy !== 0) {
+      this.lastMoveFacing = Math.atan2(this.moveDy, this.moveDx);
+    }
     const rx = gp.axes[2] ?? 0;
     const ry = gp.axes[3] ?? 0;
-    if (Math.hypot(rx, ry) > STICK_DEADZONE2) {
+    const rMag = Math.hypot(rx, ry);
+    this.aimRawX = rMag > STICK_DEADZONE2 ? rx : 0;
+    this.aimRawY = rMag > STICK_DEADZONE2 ? ry : 0;
+    if (rMag > STICK_DEADZONE2) {
       this.aimFacing = Math.atan2(ry, rx);
       this.lastAimFacing = this.aimFacing;
     } else {
@@ -520,14 +612,14 @@ var GamepadController = class _GamepadController {
     for (const [, timer] of this.holdTimers) clearInterval(timer);
     this.holdTimers.clear();
   }
-  /** Best facing: right stick > last aimed > left stick movement direction */
+  /** Best facing: right stick > last aimed > left stick > last move > fallback */
   getFacing() {
     if (!isNaN(this.aimFacing)) return this.aimFacing;
     if (this.lastAimFacing !== 0) return this.lastAimFacing;
     if (this.moveDx !== 0 || this.moveDy !== 0) {
       return Math.atan2(this.moveDy, this.moveDx);
     }
-    return 0;
+    return this.lastMoveFacing;
   }
   /** Wait for the next button press on any connected gamepad. Returns the binding. */
   waitForButton() {
@@ -564,6 +656,124 @@ var GamepadController = class _GamepadController {
   }
 };
 
+// client/src/ui/GamepadMenuNav.ts
+var FOCUSABLE_SELECTOR = 'button:not([disabled]):not([style*="display: none"]):not([style*="display:none"]), input:not([disabled]), select:not([disabled]), .sugg-vote-btn:not([disabled])';
+var NAV_REPEAT_DELAY = 220;
+var GamepadMenuNav = class {
+  container = null;
+  closeFn = null;
+  focusIndex = 0;
+  items = [];
+  // Stick repeat tracking
+  lastNavTime = 0;
+  lastStickDy = 0;
+  get active() {
+    return this.container !== null;
+  }
+  activate(container, onClose) {
+    this.deactivate();
+    this.container = container;
+    this.closeFn = onClose;
+    this.rescan();
+    this.focusIndex = 0;
+    this.highlight();
+  }
+  deactivate() {
+    this.clearHighlight();
+    this.container = null;
+    this.closeFn = null;
+    this.items = [];
+    this.focusIndex = 0;
+    this.lastNavTime = 0;
+    this.lastStickDy = 0;
+  }
+  /** Re-scan focusable elements (call after dynamic DOM changes) */
+  rescan() {
+    if (!this.container) return;
+    const els = this.container.querySelectorAll(FOCUSABLE_SELECTOR);
+    this.items = Array.from(els).filter((el) => {
+      if (el.offsetParent !== null) return true;
+      const style = getComputedStyle(el);
+      return style.display !== "none" && style.visibility !== "hidden";
+    });
+    if (this.focusIndex >= this.items.length) {
+      this.focusIndex = Math.max(0, this.items.length - 1);
+    }
+    this.highlight();
+  }
+  /** Handle a gamepad button action. Returns true if consumed. */
+  handleAction(action) {
+    if (!this.container) return false;
+    switch (action) {
+      case "interact": {
+        const el = this.items[this.focusIndex];
+        if (!el) break;
+        if (el.tagName === "INPUT") {
+          el.focus();
+        } else {
+          el.click();
+        }
+        setTimeout(() => this.rescan(), 50);
+        return true;
+      }
+      case "dash": {
+        if (this.closeFn) this.closeFn();
+        return true;
+      }
+      default:
+        break;
+    }
+    return false;
+  }
+  /** Handle D-pad navigation. Returns true if consumed. */
+  handleDpad(direction) {
+    if (!this.container || this.items.length === 0) return false;
+    this.move(direction === "up" ? -1 : 1);
+    return true;
+  }
+  /** Handle analog stick for menu scrolling (call every frame from sendInput). */
+  handleStick(dy) {
+    if (!this.container || this.items.length === 0) return;
+    const now = performance.now();
+    const threshold = 0.5;
+    if (Math.abs(dy) < threshold) {
+      this.lastStickDy = 0;
+      this.lastNavTime = 0;
+      return;
+    }
+    const dir = dy > 0 ? 1 : -1;
+    if (this.lastStickDy !== dir) {
+      this.lastStickDy = dir;
+      this.lastNavTime = now;
+      this.move(dir);
+      return;
+    }
+    if (now - this.lastNavTime >= NAV_REPEAT_DELAY) {
+      this.lastNavTime = now;
+      this.move(dir);
+    }
+  }
+  move(delta) {
+    if (this.items.length === 0) return;
+    this.clearHighlight();
+    this.focusIndex += delta;
+    if (this.focusIndex < 0) this.focusIndex = 0;
+    if (this.focusIndex >= this.items.length) this.focusIndex = this.items.length - 1;
+    this.highlight();
+  }
+  highlight() {
+    const el = this.items[this.focusIndex];
+    if (!el) return;
+    el.classList.add("gp-focus");
+    el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+  clearHighlight() {
+    if (this.container) {
+      this.container.querySelectorAll(".gp-focus").forEach((el) => el.classList.remove("gp-focus"));
+    }
+  }
+};
+
 // client/src/InputHandler.ts
 var InputHandler = class {
   keys = /* @__PURE__ */ new Set();
@@ -574,6 +784,12 @@ var InputHandler = class {
   autorun = false;
   buildMode = null;
   demolishMode = false;
+  // Mobile two-tap build: preview cell before confirming
+  mobileBuildPreview = null;
+  // Gamepad build cursor: offset from player position (world units)
+  gamepadBuildOffsetX = 0;
+  gamepadBuildOffsetY = -CELL_SIZE;
+  // start one tile above player
   menuOpen = false;
   chatOpen = false;
   modalOpen = false;
@@ -583,6 +799,7 @@ var InputHandler = class {
   isMobile;
   // Gamepad controller
   gamepad;
+  menuNav = new GamepadMenuNav();
   // Input state tracking for change detection
   lastDx = 0;
   lastDy = 0;
@@ -605,6 +822,7 @@ var InputHandler = class {
   onLunge = null;
   onBuild = null;
   onCtrlClick = null;
+  onTargetLock = null;
   onDemolish = null;
   onLogout = null;
   constructor(canvas, conn2) {
@@ -766,10 +984,19 @@ var InputHandler = class {
     const menu = document.getElementById("esc-menu");
     if (menu) {
       menu.style.display = this.menuOpen ? "flex" : "none";
+      if (this.menuOpen && this.gamepad.enabled && this.gamepad.connected) {
+        const panel = menu.querySelector(".menu-panel") || menu;
+        this.menuNav.activate(panel, () => this.toggleMenu());
+      } else {
+        this.menuNav.deactivate();
+      }
     }
   }
   setBuildMode(mode) {
     this.buildMode = mode;
+    this.mobileBuildPreview = null;
+    this.gamepadBuildOffsetX = 0;
+    this.gamepadBuildOffsetY = -CELL_SIZE;
     if (mode) {
       this.demolishMode = false;
       const demolishBtn = document.getElementById("demolish-btn");
@@ -781,6 +1008,16 @@ var InputHandler = class {
     const cancelBtn = document.getElementById("cancel-build");
     if (cancelBtn) {
       cancelBtn.style.display = mode ? "block" : "none";
+    }
+    const buildLabel = document.getElementById("mobile-build-label");
+    if (buildLabel) {
+      if (mode && this.isMobile) {
+        const names = { wall: "Wall", gate: "Gate", turret: "Turret", bed: "Bed" };
+        buildLabel.textContent = `Tap to preview ${names[mode] || mode}, tap again to place`;
+        buildLabel.style.display = "block";
+      } else {
+        buildLabel.style.display = "none";
+      }
     }
     this.canvas.style.cursor = mode ? "cell" : this.demolishMode ? "crosshair" : "crosshair";
   }
@@ -837,10 +1074,8 @@ var InputHandler = class {
     }
   }
   getFacing() {
-    if (this.gamepad.connected) {
-      const gf = this.gamepad.getFacing();
-      if (!isNaN(this.gamepad.aimFacing)) return gf;
-      if (this.gamepad.moveDx !== 0 || this.gamepad.moveDy !== 0) return gf;
+    if (this.gamepad.connected && this.gamepad.enabled) {
+      return this.gamepad.getFacing();
     }
     if (this.touch?.enabled) {
       const tf = this.touch.getFacing();
@@ -868,7 +1103,27 @@ var InputHandler = class {
   }
   handleGamepadAction(action, facing) {
     if (this.menuOpen || this.chatOpen || this.modalOpen || this.statsOpen) {
-      if (action === "menu") this.toggleMenu();
+      if (this.menuNav.active) {
+        if (action === "interact" || action === "dash") {
+          this.menuNav.handleAction(action);
+          return;
+        }
+        if (action === "build_wall") {
+          this.menuNav.handleDpad("up");
+          return;
+        }
+        if (action === "build_turret") {
+          this.menuNav.handleDpad("down");
+          return;
+        }
+      }
+      if (action === "menu") {
+        if (this.menuOpen) {
+          this.toggleMenu();
+        } else if (this.menuNav.active) {
+          this.menuNav.handleAction("dash");
+        }
+      }
       return;
     }
     const buildActions = {
@@ -899,7 +1154,15 @@ var InputHandler = class {
         this.conn.send({ type: "dash" });
         break;
       case "interact":
-        window.dispatchEvent(new KeyboardEvent("keydown", { key: "e", bubbles: true }));
+        if (this.buildMode) {
+          if (this.onBuild) {
+            const cx = this.canvas.width / 2 + this.gamepadBuildOffsetX;
+            const cy = this.canvas.height / 2 + this.gamepadBuildOffsetY;
+            this.onBuild(this.buildMode, cx, cy);
+          }
+        } else {
+          window.dispatchEvent(new KeyboardEvent("keydown", { key: "e", bubbles: true }));
+        }
         break;
       case "menu":
         this.toggleMenu();
@@ -910,6 +1173,11 @@ var InputHandler = class {
         break;
       case "autorun":
         this.autorun = !this.autorun;
+        break;
+      case "target_lock":
+        if (this.onTargetLock) {
+          this.onTargetLock(facing);
+        }
         break;
       case "demolish":
         this.setDemolishMode(!this.demolishMode);
@@ -929,6 +1197,15 @@ var InputHandler = class {
   }
   sendInput() {
     this.gamepad.poll();
+    if (this.buildMode && this.gamepad.enabled && this.gamepad.connected) {
+      const speed = CELL_SIZE * 4;
+      const dt = 1 / 60;
+      this.gamepadBuildOffsetX += this.gamepad.aimRawX * speed * dt;
+      this.gamepadBuildOffsetY += this.gamepad.aimRawY * speed * dt;
+    }
+    if (this.menuNav.active && this.gamepad.enabled && this.gamepad.connected) {
+      this.menuNav.handleStick(this.gamepad.moveDy);
+    }
     if (this.menuOpen || this.chatOpen || this.modalOpen || this.statsOpen) {
       if (this.lastDx !== 0 || this.lastDy !== 0 || this.lastAutorun) {
         this.lastDx = 0;
@@ -966,77 +1243,6 @@ var InputHandler = class {
   }
 };
 
-// packages/shared/src/constants.ts
-var TICK_RATE = 15;
-var TICK_MS = 1e3 / TICK_RATE;
-var CELL_SIZE = 32;
-var SAFE_ZONE_RADIUS = 1300;
-var VIEW_RADIUS = 1600;
-var PLAYER_SIZE = 20;
-var PUNCH_RANGE = 52;
-var PUNCH_ARC = Math.PI / 2;
-var LUNGE_AOE_RADIUS = 48;
-var SHIELD_COOLDOWN = 12e3;
-var PARRY_COOLDOWN = 3e3;
-var LION_SWIPE_ARC = Math.PI / 2;
-var PROJECTILE_SIZE = 6;
-var NO_BUILD_BUFFER = 130;
-var WALL_COST = 10;
-var GATE_COST = 15;
-var TURRET_COST = 80;
-var BED_COST = 20;
-var MAX_BUILDINGS_PER_PLAYER = 100;
-var MAX_BUILD_RANGE = 5 * CELL_SIZE;
-var BED_HEAL_RADIUS = 80;
-var BANK_NPC_RANGE = 80;
-var VOTE_COST = 50;
-var SCRIBE_NPC_RANGE = 80;
-var BANKER_POS = { x: 120, y: -60 };
-var SCRIBE_POS = { x: -120, y: -60 };
-var STAT_LEVEL_COST = 100;
-var STAT_MAX_LEVEL = 25;
-var STAT_NAMES = [
-  "moveSpeed",
-  "meleeCooldown",
-  "meleeRange",
-  "projectileSpeed",
-  "projectileTtl",
-  "lungeAoe",
-  "lungeDist",
-  "shieldDuration",
-  "knockback"
-];
-var STAT_DISPLAY_NAMES = {
-  moveSpeed: "Move Speed",
-  meleeCooldown: "Melee Speed",
-  meleeRange: "Melee Range",
-  projectileSpeed: "Projectile Speed",
-  projectileTtl: "Projectile Range",
-  lungeAoe: "Lunge AOE",
-  lungeDist: "Lunge Distance",
-  shieldDuration: "Shield Duration",
-  knockback: "Knockback"
-};
-var SIGN_RANGE = 80;
-var PATCH_NOTES_SIGN_POS = { x: 180, y: 126 };
-var RULES_SIGN_POS = { x: -180, y: 126 };
-var NOTICES_SIGN_POS = { x: 0, y: 236 };
-
-// packages/shared/src/types.ts
-function defaultStatLevels() {
-  return {
-    moveSpeed: 0,
-    meleeCooldown: 0,
-    meleeRange: 0,
-    projectileSpeed: 0,
-    projectileTtl: 0,
-    lungeAoe: 0,
-    lungeDist: 0,
-    shieldDuration: 0,
-    knockback: 0
-  };
-}
-
 // client/src/GameState.ts
 var GameState = class {
   myId = 0;
@@ -1057,6 +1263,10 @@ var GameState = class {
   selfShieldCooldownUntil = 0;
   selfParryActive = false;
   selfParryCooldownUntil = 0;
+  selfPunchCooldownUntil = 0;
+  selfLungeCooldownUntil = 0;
+  selfArrowCooldownUntil = 0;
+  selfDashCooldownUntil = 0;
   dayPhase = "day";
   // Leaderboard and rules
   leaderboard = [];
@@ -1089,7 +1299,7 @@ var GameState = class {
   cameraY = 0;
   // Server target position for per-frame smoothing
   selfTargetPos = { x: 0, y: 0 };
-  applySnapshot(serverTime, entities, selfHp, selfMaxHp, selfSource, selfPos, selfDead, selfRespawnAt, dayPhase, selfFacing, selfAnim, selfShieldActive, selfShieldCooldownUntil, selfParryActive, selfParryCooldownUntil, selfStatLevels, selfBankedSource, selfBuildingCount) {
+  applySnapshot(serverTime, entities, selfHp, selfMaxHp, selfSource, selfPos, selfDead, selfRespawnAt, dayPhase, selfFacing, selfAnim, selfShieldActive, selfShieldCooldownUntil, selfParryActive, selfParryCooldownUntil, selfPunchCooldownUntil, selfLungeCooldownUntil, selfArrowCooldownUntil, selfDashCooldownUntil, selfStatLevels, selfBankedSource, selfBuildingCount) {
     this.selfHp = selfHp;
     this.selfMaxHp = selfMaxHp;
     this.selfSource = selfSource;
@@ -1101,6 +1311,10 @@ var GameState = class {
     this.selfShieldCooldownUntil = selfShieldCooldownUntil - this.clockOffset;
     this.selfParryActive = selfParryActive;
     this.selfParryCooldownUntil = selfParryCooldownUntil - this.clockOffset;
+    this.selfPunchCooldownUntil = selfPunchCooldownUntil - this.clockOffset;
+    this.selfLungeCooldownUntil = selfLungeCooldownUntil - this.clockOffset;
+    this.selfArrowCooldownUntil = selfArrowCooldownUntil - this.clockOffset;
+    this.selfDashCooldownUntil = selfDashCooldownUntil - this.clockOffset;
     this.selfFacing = selfFacing;
     this.selfAnim = selfAnim;
     this.selfStatLevels = selfStatLevels;
@@ -1190,18 +1404,7 @@ function drawWorld(ctx, cam, screenW, screenH, phase) {
   ctx.stroke();
 }
 
-// client/src/rendering/EntityRenderer.ts
-var animTimers = /* @__PURE__ */ new Map();
-var lastAnim = /* @__PURE__ */ new Map();
-var lastDashAnim = /* @__PURE__ */ new Map();
-var dashTrails = [];
-var DASH_TRAIL_DURATION = 300;
-var spawnTimers = /* @__PURE__ */ new Map();
-var deathTimers = /* @__PURE__ */ new Map();
-var knownEntities = /* @__PURE__ */ new Set();
-var firstDrawTime = 0;
-var healParticles = [];
-var lastSelfHp = -1;
+// client/src/rendering/RenderUtils.ts
 function stepFrame(time, fps, frameCount) {
   return Math.floor(time * fps % frameCount);
 }
@@ -1219,14 +1422,27 @@ function getFrameInfo(time, fps, frameCount) {
   const sub = raw - frame;
   return { frame, sub };
 }
-var PLAYER_WALK = {
-  bodyBob: [-1, 0.5, -1, 0.5],
-  leftLegY: [5, 0, -5, 0],
-  rightLegY: [-5, 0, 5, 0],
-  leftArmY: [-3, 0, 3, 0],
-  rightArmY: [3, 0, -3, 0],
-  torsoTilt: [0.02, 0, -0.02, 0]
-};
+function drawHpBar(ctx, x, y, hp, maxHp) {
+  const w = 24;
+  const h = 3;
+  const ratio = Math.max(0, hp / maxHp);
+  ctx.fillStyle = "rgba(0,0,0,0.5)";
+  ctx.fillRect(x - w / 2, y, w, h);
+  ctx.fillStyle = ratio > 0.5 ? "#4caf50" : ratio > 0.25 ? "#ff9800" : "#f44336";
+  ctx.fillRect(x - w / 2, y, w * ratio, h);
+}
+var darkenCache = /* @__PURE__ */ new Map();
+function darkenColor(hex, factor) {
+  const key = hex + factor;
+  let result = darkenCache.get(key);
+  if (result) return result;
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  result = `rgb(${Math.floor(r * (1 - factor))},${Math.floor(g * (1 - factor))},${Math.floor(b * (1 - factor))})`;
+  darkenCache.set(key, result);
+  return result;
+}
 var LION_GALLOP = {
   bodyStretchX: [0.92, 0.96, 1.08, 1.06, 1.02, 0.95],
   bodyStretchY: [1.08, 1.02, 0.94, 0.96, 1, 1.06],
@@ -1251,6 +1467,732 @@ var STAG_STRIDE = {
   headDip: [1, 0, -1, 0],
   flamePulse: [1.2, 0.9, 1.4, 1]
 };
+var PLAYER_WALK = {
+  bodyBob: [-1, 0.5, -1, 0.5],
+  leftLegY: [5, 0, -5, 0],
+  rightLegY: [-5, 0, 5, 0],
+  leftArmY: [-3, 0, 3, 0],
+  rightArmY: [3, 0, -3, 0],
+  torsoTilt: [0.02, 0, -0.02, 0]
+};
+
+// client/src/rendering/LionRenderer.ts
+function drawLionSpawn(ctx, x, y, entity, progress) {
+  const eased = easeOutQuart(progress);
+  ctx.save();
+  ctx.translate(x, y);
+  const dustAlpha = 1 - eased;
+  ctx.globalAlpha = dustAlpha * 0.6;
+  ctx.fillStyle = "#aa8844";
+  for (let i = 0; i < 6; i++) {
+    const angle = i / 6 * Math.PI * 2;
+    const dist = 15 * (1 - eased * 0.5);
+    const size = 8 - eased * 4;
+    ctx.beginPath();
+    ctx.arc(Math.cos(angle) * dist, Math.sin(angle) * dist, size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = eased;
+  ctx.save();
+  const scale = 0.3 + eased * 0.7;
+  ctx.scale(scale, scale);
+  ctx.translate(-x, -y);
+  ctx.restore();
+  ctx.restore();
+  ctx.save();
+  ctx.globalAlpha = eased;
+  drawLion(ctx, x, y, entity);
+  ctx.restore();
+}
+function drawLionDeath(ctx, x, y, progress) {
+  const eased = easeOutQuart(progress);
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.globalAlpha = (1 - eased) * 0.7;
+  ctx.fillStyle = "#aa8844";
+  for (let i = 0; i < 8; i++) {
+    const angle = i / 8 * Math.PI * 2 + i * 0.3;
+    const dist = eased * 25;
+    const size = 4 * (1 - eased);
+    ctx.beginPath();
+    ctx.arc(Math.cos(angle) * dist, Math.sin(angle) * dist, size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = (1 - eased) * 0.5;
+  ctx.fillStyle = "#c4873a";
+  for (let i = 0; i < 5; i++) {
+    const angle = i / 5 * Math.PI * 2;
+    const dist = eased * 15;
+    ctx.beginPath();
+    ctx.arc(Math.cos(angle) * dist, Math.sin(angle) * dist - eased * 10, 3 * (1 - eased), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = Math.max(0, (progress - 0.3) / 0.7) * (1 - eased);
+  ctx.fillStyle = "#ffdd44";
+  for (let i = 0; i < 3; i++) {
+    const yOff = -eased * 20 - i * 5;
+    ctx.beginPath();
+    ctx.arc((i - 1) * 6, yOff, 2 * (1 - eased), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+function drawLion(ctx, x, y, entity) {
+  const time = Date.now() / 1e3;
+  const facing = entity.facing ?? 0;
+  const facingRight = Math.cos(facing) >= 0;
+  const anim = entity.anim;
+  const isWindup = anim === "windup";
+  const isPounce = anim === "pounce";
+  const isSwipe = anim === "punch";
+  const isCrouch = anim === "crouch";
+  const gallopFps = 10;
+  const { frame: gFrame, sub: gSub } = getFrameInfo(time, gallopFps, 6);
+  let bob, fLegY, bLegY, headBob, tailY;
+  if (isWindup) {
+    const pulse = Math.sin(time * 12) * 0.3;
+    bob = 4 + pulse;
+    fLegY = 2;
+    bLegY = 2;
+    headBob = 3;
+    tailY = -3;
+  } else if (isPounce) {
+    bob = -5;
+    fLegY = -4;
+    bLegY = 3;
+    headBob = -4;
+    tailY = 4;
+  } else if (isSwipe) {
+    bob = 1;
+    fLegY = -2;
+    bLegY = 1;
+    headBob = -1;
+    tailY = 2;
+  } else if (isCrouch) {
+    const breathe = Math.sin(time * 3) * 0.5;
+    bob = 5 + breathe;
+    fLegY = 3;
+    bLegY = 3;
+    headBob = 4;
+    tailY = -2;
+  } else {
+    bob = keyLerp(LION_GALLOP.bodyBob, gFrame, gSub);
+    fLegY = keyLerp(LION_GALLOP.frontLegAngle, gFrame, gSub) * 4;
+    bLegY = keyLerp(LION_GALLOP.backLegAngle, gFrame, gSub) * 4;
+    headBob = keyLerp(LION_GALLOP.headBob, gFrame, gSub);
+    tailY = keyLerp(LION_GALLOP.tailAngle, gFrame, gSub) * 6;
+  }
+  const O = "#1a1008";
+  const BODY = "#d4a030";
+  const BODY_HI = "#e8c050";
+  const BODY_SH = "#b08020";
+  const MANE = "#7a3c14";
+  const MANE_D = "#4c2408";
+  ctx.save();
+  ctx.translate(x, y);
+  if (!facingRight) ctx.scale(-1, 1);
+  ctx.fillStyle = "rgba(0,0,0,0.12)";
+  ctx.beginPath();
+  ctx.ellipse(0, 12 + bob * 0.3, 12, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+  if (isWindup) {
+    const pulse = 0.5 + Math.sin(time * 14) * 0.3;
+    ctx.fillStyle = `rgba(255, 80, 20, ${pulse * 0.3})`;
+    ctx.beginPath();
+    ctx.ellipse(0, 10, 16 + pulse * 3, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = `rgba(255, 120, 40, ${pulse * 0.5})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(0, 10, 16 + pulse * 3, 6, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  if (isPounce) {
+    ctx.strokeStyle = "rgba(200, 160, 60, 0.4)";
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < 3; i++) {
+      const lx = -14 - i * 6;
+      const ly = -2 + i * 4;
+      ctx.beginPath();
+      ctx.moveTo(lx, ly);
+      ctx.lineTo(lx - 8, ly + 1);
+      ctx.stroke();
+    }
+  }
+  if (isSwipe) {
+    const swipeT = time * 1e3 % 250 / 250;
+    const sweep = Math.min(1, swipeT * 1.8);
+    const fade = 1 - Math.max(0, (swipeT - 0.5) / 0.5);
+    ctx.lineCap = "round";
+    for (let i = -1; i <= 1; i++) {
+      const baseX = 14;
+      const baseY = -7 + i * 7;
+      const scratchLen = 14 * sweep;
+      ctx.strokeStyle = `rgba(220, 60, 10, ${0.6 * fade})`;
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(baseX, baseY);
+      ctx.lineTo(baseX + scratchLen, baseY + scratchLen * 0.5);
+      ctx.stroke();
+      ctx.strokeStyle = `rgba(255, 250, 200, ${0.9 * fade})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(baseX, baseY);
+      ctx.lineTo(baseX + scratchLen, baseY + scratchLen * 0.5);
+      ctx.stroke();
+    }
+  }
+  const tailBaseX = -9;
+  const tailTipX = tailBaseX - 10;
+  const tailTipY = bob - 4 + tailY;
+  ctx.strokeStyle = O;
+  ctx.lineWidth = 3;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(tailBaseX, bob + 1);
+  ctx.lineTo(tailTipX, tailTipY);
+  ctx.stroke();
+  ctx.strokeStyle = BODY;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(tailBaseX, bob + 1);
+  ctx.lineTo(tailTipX, tailTipY);
+  ctx.stroke();
+  ctx.fillStyle = MANE_D;
+  ctx.fillRect(tailTipX - 2, tailTipY - 2, 4, 4);
+  const legW = 4;
+  const legH = 7;
+  ctx.fillStyle = BODY_SH;
+  ctx.fillRect(-8, 3 + bob + bLegY * 0.3, legW, legH - bLegY * 0.15);
+  ctx.fillRect(4, 3 + bob + fLegY * 0.3, legW, legH - fLegY * 0.15);
+  ctx.fillStyle = O;
+  ctx.fillRect(-8, 3 + bob + legH + bLegY * 0.15, legW, 2);
+  ctx.fillRect(4, 3 + bob + legH + fLegY * 0.15, legW, 2);
+  ctx.save();
+  ctx.translate(0, bob);
+  ctx.fillStyle = O;
+  ctx.beginPath();
+  ctx.roundRect(-11, -6, 22, 14, 3);
+  ctx.fill();
+  ctx.fillStyle = BODY;
+  ctx.beginPath();
+  ctx.roundRect(-10, -5, 20, 12, 2);
+  ctx.fill();
+  ctx.fillStyle = BODY_HI;
+  ctx.fillRect(-8, -4, 16, 4);
+  ctx.fillStyle = BODY_SH;
+  ctx.fillRect(-8, 3, 16, 3);
+  ctx.restore();
+  ctx.fillStyle = BODY;
+  ctx.fillRect(-6, 3 + bob + bLegY * 0.3, legW, legH - bLegY * 0.15);
+  ctx.fillRect(6, 3 + bob + fLegY * 0.3, legW, legH - fLegY * 0.15);
+  ctx.fillStyle = O;
+  ctx.fillRect(-6, 3 + bob + legH + bLegY * 0.15, legW, 2);
+  ctx.fillRect(6, 3 + bob + legH + fLegY * 0.15, legW, 2);
+  const mX = 7;
+  const mY = -5 + bob + headBob;
+  ctx.fillStyle = O;
+  ctx.beginPath();
+  ctx.roundRect(mX - 9, mY - 8, 18, 17, 4);
+  ctx.fill();
+  ctx.fillStyle = MANE_D;
+  ctx.beginPath();
+  ctx.roundRect(mX - 8, mY - 7, 16, 15, 3);
+  ctx.fill();
+  ctx.fillStyle = MANE;
+  ctx.beginPath();
+  ctx.roundRect(mX - 6, mY - 5, 12, 11, 2);
+  ctx.fill();
+  const hX = 11;
+  const hY = -3 + bob + headBob;
+  ctx.fillStyle = O;
+  ctx.beginPath();
+  ctx.roundRect(hX - 6, hY - 5, 12, 11, 3);
+  ctx.fill();
+  ctx.fillStyle = BODY;
+  ctx.beginPath();
+  ctx.roundRect(hX - 5, hY - 4, 10, 9, 2);
+  ctx.fill();
+  ctx.fillStyle = BODY_HI;
+  ctx.fillRect(hX - 4, hY - 3, 8, 3);
+  ctx.fillStyle = O;
+  ctx.fillRect(hX - 4, hY - 8, 4, 4);
+  ctx.fillStyle = MANE;
+  ctx.fillRect(hX - 3, hY - 7, 2, 2);
+  ctx.fillStyle = "#d4977a";
+  ctx.fillRect(hX - 3, hY - 6, 1, 1);
+  ctx.fillStyle = BODY_HI;
+  ctx.beginPath();
+  ctx.roundRect(hX + 4, hY - 1, 5, 4, 1);
+  ctx.fill();
+  ctx.fillStyle = "#cc7788";
+  ctx.fillRect(hX + 7, hY - 1, 2, 2);
+  ctx.fillStyle = O;
+  ctx.fillRect(hX + 7, hY - 1, 2, 1);
+  ctx.fillStyle = O;
+  ctx.fillRect(hX + 5, hY + 3, 3, 1);
+  ctx.fillStyle = "#f0efe8";
+  ctx.fillRect(hX + 6, hY + 3, 1, 2);
+  const eyeW = isWindup ? 4 : isPounce || isSwipe ? 3 : isCrouch ? 3 : 3;
+  const eyeH = isWindup ? 3 : isPounce ? 1 : isSwipe ? 1 : isCrouch ? 1 : 2;
+  ctx.fillStyle = "#f8f4e0";
+  ctx.fillRect(hX + 1, hY - 3, eyeW, eyeH);
+  ctx.fillStyle = "#c08820";
+  ctx.fillRect(hX + 2, hY - 3, 2, eyeH);
+  ctx.fillStyle = O;
+  ctx.fillRect(hX + 3, hY - 3, 1, eyeH);
+  ctx.fillStyle = O;
+  ctx.fillRect(hX, hY - 4, eyeW + 1, 1);
+  ctx.restore();
+  ctx.save();
+  ctx.translate(x, y);
+  if (entity.hp !== void 0 && entity.maxHp !== void 0) {
+    drawHpBar(ctx, 0, -18, entity.hp, entity.maxHp);
+  }
+  ctx.restore();
+}
+
+// client/src/rendering/GhostRenderer.ts
+function drawGhostSpawn(ctx, x, y, entity, progress) {
+  const eased = easeOutQuart(progress);
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.globalAlpha = (1 - eased) * 0.5;
+  ctx.strokeStyle = "#8899cc";
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 4; i++) {
+    const angle = i / 4 * Math.PI * 2 + progress * Math.PI * 4;
+    const dist = 20 * (1 - eased);
+    ctx.beginPath();
+    ctx.arc(Math.cos(angle) * dist, Math.sin(angle) * dist, 5 * (1 - eased), 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = eased * 0.3;
+  ctx.fillStyle = "#aabbee";
+  ctx.beginPath();
+  ctx.arc(0, 0, 20 * (1 - eased * 0.5), 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  ctx.save();
+  ctx.globalAlpha = eased;
+  const yOffset = 15 * (1 - eased);
+  drawGhost(ctx, x, y + yOffset, entity);
+  ctx.restore();
+}
+function drawGhostDeath(ctx, x, y, progress) {
+  const eased = easeOutQuart(progress);
+  ctx.save();
+  ctx.translate(x, y);
+  for (let i = 0; i < 6; i++) {
+    const angle = i / 6 * Math.PI * 2 + progress * Math.PI;
+    const dist = eased * 30;
+    const size = 5 * (1 - eased);
+    ctx.globalAlpha = (1 - eased) * 0.4;
+    ctx.fillStyle = "#d0daf0";
+    ctx.beginPath();
+    ctx.arc(Math.cos(angle) * dist, Math.sin(angle) * dist, size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = (1 - eased) * 0.6;
+  ctx.fillStyle = "#d0daf0";
+  const shrink = 1 - eased;
+  ctx.beginPath();
+  ctx.arc(0, 0, 10 * shrink, 0, Math.PI * 2);
+  ctx.fill();
+  if (progress < 0.7) {
+    const eyeAlpha = (0.7 - progress) / 0.7;
+    ctx.globalAlpha = eyeAlpha * 0.9;
+    ctx.fillStyle = "#3344aa";
+    ctx.beginPath();
+    ctx.arc(-4.5, -4, 3 * shrink, 0, Math.PI * 2);
+    ctx.arc(4.5, -4, 3 * shrink, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = (1 - eased) * 0.3;
+  ctx.fillStyle = "#8899cc";
+  for (let i = 0; i < 3; i++) {
+    const dropX = (i - 1) * 7;
+    const dropY = eased * 25 + i * 3;
+    ctx.beginPath();
+    ctx.ellipse(dropX, dropY, 2 * (1 - eased), 4 * (1 - eased), 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+function drawGhost(ctx, x, y, entity) {
+  const time = Date.now() / 1e3;
+  const facing = entity.facing ?? 0;
+  const anim = entity.anim;
+  const isWindup = anim === "windup";
+  const isFiring = anim === "shoot";
+  const isPhased = anim === "shield";
+  const floatFps = 3;
+  const { frame: fFrame, sub: fSub } = getFrameInfo(time, floatFps, 4);
+  const bob = keyLerp(GHOST_FLOAT.bob, fFrame, fSub);
+  const bodyScale = keyLerp(GHOST_FLOAT.bodyScale, fFrame, fSub);
+  const tendrilW = keyLerp(GHOST_FLOAT.tendrilW, fFrame, fSub);
+  const eyeScale = keyLerp(GHOST_FLOAT.eyeSquint, fFrame, fSub);
+  ctx.save();
+  if (isPhased) {
+    ctx.globalAlpha = 0.18 + Math.sin(time * 10) * 0.08;
+  }
+  const shakeX = isWindup ? Math.sin(time * 60) * 3 : isPhased ? Math.sin(time * 12) * 2 : 0;
+  const shakeY = isWindup ? Math.cos(time * 45) * 2 : isPhased ? Math.cos(time * 9) * 1.5 : 0;
+  ctx.translate(x + shakeX, y + bob + shakeY);
+  if (isPhased) {
+    ctx.save();
+    ctx.globalAlpha = 0.12 + Math.sin(time * 4) * 0.06;
+    ctx.fillStyle = "#8899cc";
+    ctx.beginPath();
+    ctx.ellipse(0, -2, 18 + Math.sin(time * 3) * 3, 22 + Math.cos(time * 2.5) * 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+  const wispDirX = -Math.cos(facing);
+  const wispDirY = -Math.sin(facing);
+  ctx.fillStyle = "#8899cc";
+  for (let i = 0; i < 5; i++) {
+    const wispFrame = stepFrame(time + i * 0.3, 4, 3);
+    const baseX = wispDirX * (8 + i * 4) + (wispFrame - 1) * 2;
+    const baseY = 12 + i * 3 + wispDirY * (4 + i * 2) + wispFrame * 1.5;
+    const wSize = 3.5 - i * 0.4;
+    ctx.globalAlpha = 0.15 - i * 0.02;
+    ctx.beginPath();
+    ctx.arc(baseX, baseY, wSize, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 0.06 + (fFrame === 1 ? 0.04 : 0);
+  ctx.fillStyle = "#aabbee";
+  ctx.beginPath();
+  ctx.arc(0, 0, 20, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 0.55 + fFrame % 2 * 0.1;
+  ctx.fillStyle = "#d0daf0";
+  ctx.save();
+  ctx.scale(1 / bodyScale, bodyScale);
+  ctx.beginPath();
+  ctx.moveTo(0, -14);
+  ctx.bezierCurveTo(-13, -8, -11, 8, -9, 12);
+  const t1 = tendrilW;
+  const t2 = -tendrilW * 0.8;
+  const t3 = tendrilW * 0.6;
+  ctx.lineTo(-7, 14 + t1);
+  ctx.lineTo(-4, 10 + t2);
+  ctx.lineTo(-1, 16 + t3);
+  ctx.lineTo(2, 10 + t1);
+  ctx.lineTo(5, 14 + t2);
+  ctx.lineTo(8, 11 + t3);
+  ctx.lineTo(9, 12);
+  ctx.bezierCurveTo(11, 8, 13, -8, 0, -14);
+  ctx.fill();
+  ctx.restore();
+  ctx.globalAlpha = 0.15 + (fFrame === 0 ? 0.1 : 0);
+  ctx.fillStyle = "#eef2ff";
+  ctx.beginPath();
+  ctx.ellipse(0, -2, 7, 9, 0, 0, Math.PI * 2);
+  ctx.fill();
+  if (isPhased) {
+    ctx.save();
+    ctx.globalAlpha = 0.3 + Math.sin(time * 5) * 0.15;
+    ctx.strokeStyle = "#6666cc";
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([3, 5]);
+    ctx.beginPath();
+    const ringRadius = 16 + Math.sin(time * 3) * 3;
+    ctx.arc(0, -3, ringRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    for (let i = 0; i < 4; i++) {
+      const angle = time * 2 + i * Math.PI / 2;
+      const dist = 12 + Math.sin(time * 4 + i) * 5;
+      const px = Math.cos(angle) * dist;
+      const py = Math.sin(angle) * dist - 3;
+      ctx.globalAlpha = 0.2 + Math.sin(time * 6 + i * 2) * 0.15;
+      ctx.fillStyle = "#aabbff";
+      ctx.beginPath();
+      ctx.arc(px, py, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+  const eyeDirX = Math.cos(facing) * 3.5;
+  const eyeDirY = Math.sin(facing) * 2.5;
+  const scary = isWindup || isFiring;
+  ctx.globalAlpha = isPhased ? 0.4 : 0.9;
+  ctx.fillStyle = scary ? "#2a0808" : "#1a2244";
+  const socketScale = scary ? 1.3 : 1;
+  ctx.beginPath();
+  ctx.ellipse(-4.5, -4, 4 * socketScale, 4.5 * eyeScale * socketScale, -0.1, 0, Math.PI * 2);
+  ctx.ellipse(4.5, -4, 4 * socketScale, 4.5 * eyeScale * socketScale, 0.1, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = scary ? "#cc2200" : "#3344aa";
+  ctx.beginPath();
+  ctx.ellipse(-4.5 + eyeDirX * 0.3, -4 + eyeDirY * 0.3, 3.5 * socketScale, 4 * eyeScale * socketScale, -0.1, 0, Math.PI * 2);
+  ctx.ellipse(4.5 + eyeDirX * 0.3, -4 + eyeDirY * 0.3, 3.5 * socketScale, 4 * eyeScale * socketScale, 0.1, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = scary ? "#ff4400" : "#112266";
+  ctx.beginPath();
+  ctx.arc(-4.5 + eyeDirX, -3.5 + eyeDirY, scary ? 2.5 : 2, 0, Math.PI * 2);
+  ctx.arc(4.5 + eyeDirX, -3.5 + eyeDirY, scary ? 2.5 : 2, 0, Math.PI * 2);
+  ctx.fill();
+  if (scary) {
+    ctx.fillStyle = "#1a0808";
+    ctx.globalAlpha = 0.8;
+    ctx.beginPath();
+    ctx.ellipse(0, 4, 5, 3 + Math.sin(time * 20) * 1, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = scary ? "#ff8866" : "#eef4ff";
+  ctx.globalAlpha = 0.95;
+  ctx.beginPath();
+  ctx.arc(-4.5 + eyeDirX * 0.8, -4.5 + eyeDirY * 0.6, 1.5, 0, Math.PI * 2);
+  ctx.arc(4.5 + eyeDirX * 0.8, -4.5 + eyeDirY * 0.6, 1.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  if (entity.hp !== void 0 && entity.maxHp !== void 0) {
+    drawHpBar(ctx, 0, -20 - bob, entity.hp, entity.maxHp);
+  }
+  ctx.restore();
+}
+
+// client/src/rendering/StagRenderer.ts
+function drawStag(ctx, x, y, entity) {
+  ctx.save();
+  ctx.translate(x, y);
+  const facing = entity.facing ?? 0;
+  const time = Date.now() / 1e3;
+  ctx.rotate(facing);
+  const strideFps = 6;
+  const { frame: sFrame, sub: sSub } = getFrameInfo(time, strideFps, 4);
+  const sBob = keyLerp(STAG_STRIDE.bodyBob, sFrame, sSub);
+  const sStretchX = keyLerp(STAG_STRIDE.bodyStretchX, sFrame, sSub);
+  const sStretchY = keyLerp(STAG_STRIDE.bodyStretchY, sFrame, sSub);
+  const sFLeg = keyLerp(STAG_STRIDE.frontLegFwd, sFrame, sSub);
+  const sBLeg = keyLerp(STAG_STRIDE.backLegFwd, sFrame, sSub);
+  const sHead = keyLerp(STAG_STRIDE.headDip, sFrame, sSub);
+  const sFlame = keyLerp(STAG_STRIDE.flamePulse, sFrame, sSub);
+  const contactPulse = sFrame === 0 || sFrame === 2 ? 0.06 : 0;
+  ctx.globalAlpha = 0.1 + contactPulse;
+  ctx.fillStyle = "#ff4400";
+  ctx.beginPath();
+  ctx.arc(0, 0, 32, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 0.05 + contactPulse * 0.5;
+  ctx.fillStyle = "#ff6600";
+  ctx.beginPath();
+  ctx.arc(0, 0, 38, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = "#ff4400";
+  for (let i = 0; i < 5; i++) {
+    const eFrame = stepFrame(time + i * 0.4, 3, 4);
+    const angles = [0.3, 1.1, 2.2, 3.5, 4.8];
+    const ex = Math.cos(angles[i] + eFrame * 0.5) * 20;
+    const ey = Math.sin(angles[i] + eFrame * 0.7) * 14;
+    ctx.globalAlpha = eFrame === 0 ? 0.5 : 0.2;
+    ctx.beginPath();
+    ctx.arc(ex, ey, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = "#5c2f0f";
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = "round";
+  const fKneeX = 8 + sFLeg * 0.5;
+  const fFootX = 6 + sFLeg;
+  ctx.beginPath();
+  ctx.moveTo(6, 10);
+  ctx.lineTo(fKneeX, 14 + sBob * 0.5);
+  ctx.lineTo(fFootX, 18 + sBob);
+  ctx.moveTo(12, 10);
+  ctx.lineTo(fKneeX + 5, 14 - sBob * 0.3);
+  ctx.lineTo(fFootX + 5, 18 - sBob * 0.5);
+  ctx.stroke();
+  const bKneeX = -8 + sBLeg * 0.5;
+  const bFootX = -10 + sBLeg;
+  ctx.beginPath();
+  ctx.moveTo(-4, 11);
+  ctx.lineTo(bKneeX, 14 - sBob * 0.5);
+  ctx.lineTo(bFootX, 18 - sBob);
+  ctx.moveTo(-10, 10);
+  ctx.lineTo(bKneeX - 5, 14 + sBob * 0.3);
+  ctx.lineTo(bFootX - 5, 18 + sBob * 0.5);
+  ctx.stroke();
+  ctx.fillStyle = "#3a1a08";
+  ctx.beginPath();
+  ctx.arc(fFootX, 18 + sBob, 2, 0, Math.PI * 2);
+  ctx.arc(fFootX + 5, 18 - sBob * 0.5, 2, 0, Math.PI * 2);
+  ctx.arc(bFootX, 18 - sBob, 2, 0, Math.PI * 2);
+  ctx.arc(bFootX - 5, 18 + sBob * 0.5, 2, 0, Math.PI * 2);
+  ctx.fill();
+  if (sFrame === 0 || sFrame === 2) {
+    ctx.globalAlpha = 0.15;
+    ctx.fillStyle = "#aa7744";
+    const dustX = sFrame === 0 ? fFootX : bFootX;
+    ctx.beginPath();
+    ctx.arc(dustX, 20 + sBob, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  ctx.save();
+  ctx.translate(0, sBob);
+  ctx.scale(sStretchX, sStretchY);
+  ctx.fillStyle = "#6b3410";
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 18, 12, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "#ff440044";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(-6, -4);
+  ctx.lineTo(-2, 2);
+  ctx.lineTo(4, -1);
+  ctx.moveTo(2, 3);
+  ctx.lineTo(8, 5);
+  ctx.stroke();
+  ctx.fillStyle = "#7a3c14";
+  ctx.beginPath();
+  ctx.ellipse(2, -3, 10, 5, 0.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  const neckY = sBob + sHead;
+  ctx.fillStyle = "#7a3c14";
+  ctx.beginPath();
+  ctx.ellipse(14 * sStretchX, -2 + neckY, 7, 6, -0.3, 0, 0, Math.PI * 2);
+  ctx.fill();
+  const headX = 22 * sStretchX;
+  const headY = -2 + neckY + sHead;
+  ctx.fillStyle = "#8b4513";
+  ctx.beginPath();
+  ctx.ellipse(headX, headY, 6, 5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#6b3410";
+  ctx.beginPath();
+  ctx.ellipse(headX + 5, headY + 1, 3, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#3a1a08";
+  ctx.beginPath();
+  ctx.arc(headX + 6.5, headY, 1, 0, Math.PI * 2);
+  ctx.arc(headX + 6.5, headY + 2, 1, 0, Math.PI * 2);
+  ctx.fill();
+  const smokeFrame = stepFrame(time, 5, 3);
+  ctx.globalAlpha = 0.25 - smokeFrame * 0.06;
+  ctx.strokeStyle = "#aa4400";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(headX + 8, headY);
+  ctx.lineTo(headX + 10 + smokeFrame * 3, headY - 2 - smokeFrame * 2);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = "#d4a055";
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = "round";
+  const antlerBaseX = headX - 3;
+  const antlerBaseY = headY;
+  ctx.beginPath();
+  ctx.moveTo(antlerBaseX, antlerBaseY - 4);
+  ctx.lineTo(antlerBaseX - 5, antlerBaseY - 18);
+  ctx.lineTo(antlerBaseX - 9, antlerBaseY - 26);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(antlerBaseX - 5, antlerBaseY - 18);
+  ctx.lineTo(antlerBaseX - 1, antlerBaseY - 24);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(antlerBaseX - 3, antlerBaseY - 12);
+  ctx.lineTo(antlerBaseX - 9, antlerBaseY - 16);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(antlerBaseX, antlerBaseY + 4);
+  ctx.lineTo(antlerBaseX - 5, antlerBaseY + 18);
+  ctx.lineTo(antlerBaseX - 9, antlerBaseY + 26);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(antlerBaseX - 5, antlerBaseY + 18);
+  ctx.lineTo(antlerBaseX - 1, antlerBaseY + 24);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(antlerBaseX - 3, antlerBaseY + 12);
+  ctx.lineTo(antlerBaseX - 9, antlerBaseY + 16);
+  ctx.stroke();
+  const tipGlow = sFrame % 2 === 0 ? 0.5 : 0.3;
+  ctx.globalAlpha = tipGlow;
+  ctx.fillStyle = "#ff6600";
+  ctx.beginPath();
+  ctx.arc(antlerBaseX - 9, antlerBaseY - 26, 2.5, 0, Math.PI * 2);
+  ctx.arc(antlerBaseX - 9, antlerBaseY + 26, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = "#ff6600";
+  ctx.shadowColor = "#ff4400";
+  ctx.shadowBlur = 8;
+  ctx.beginPath();
+  ctx.arc(headX + 1, headY - 3, 2.2, 0, Math.PI * 2);
+  ctx.arc(headX + 1, headY + 3, 2.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = "#ffcc00";
+  ctx.beginPath();
+  ctx.arc(headX + 1.5, headY - 3, 1, 0, Math.PI * 2);
+  ctx.arc(headX + 1.5, headY + 3, 1, 0, Math.PI * 2);
+  ctx.fill();
+  const flameScale = sFlame;
+  ctx.save();
+  ctx.translate(-18 * sStretchX, sBob);
+  ctx.scale(flameScale, flameScale);
+  const flameFrame = stepFrame(time, 8, 3);
+  const flameOffsets = [[0, -2, 3], [1, -3, 1], [-1, -1, 2]][flameFrame];
+  ctx.fillStyle = "#ff4400";
+  ctx.globalAlpha = 0.8;
+  ctx.beginPath();
+  ctx.moveTo(0, -2);
+  ctx.lineTo(-8 + flameOffsets[0], -4 + flameOffsets[1]);
+  ctx.lineTo(-5, 0 + flameOffsets[2]);
+  ctx.lineTo(-9 + flameOffsets[0], 3 + flameOffsets[1]);
+  ctx.lineTo(0, 2);
+  ctx.fill();
+  ctx.fillStyle = "#ffaa22";
+  ctx.globalAlpha = 0.7;
+  ctx.beginPath();
+  ctx.moveTo(0, -1);
+  ctx.lineTo(-4 + flameOffsets[0], -2 + flameOffsets[2] * 0.5);
+  ctx.lineTo(-2, 0);
+  ctx.lineTo(-4 + flameOffsets[0], 1 + flameOffsets[1] * 0.5);
+  ctx.lineTo(0, 1);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.restore();
+  ctx.restore();
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = "#ff4400";
+  ctx.font = "bold 12px sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("BOSS", 0, -34);
+  if (entity.hp !== void 0 && entity.maxHp !== void 0) {
+    const w = 44;
+    const h = 4;
+    const ratio = Math.max(0, entity.hp / entity.maxHp);
+    ctx.fillStyle = "rgba(0,0,0,0.7)";
+    ctx.fillRect(-w / 2, -30, w, h);
+    ctx.fillStyle = ratio > 0.5 ? "#ff6600" : ratio > 0.25 ? "#ff3300" : "#ff0000";
+    ctx.fillRect(-w / 2, -30, w * ratio, h);
+  }
+  ctx.restore();
+}
+
+// client/src/rendering/EntityRenderer.ts
+var animTimers = /* @__PURE__ */ new Map();
+var lastAnim = /* @__PURE__ */ new Map();
+var lastDashAnim = /* @__PURE__ */ new Map();
+var dashTrails = [];
+var DASH_TRAIL_DURATION = 300;
+var spawnTimers = /* @__PURE__ */ new Map();
+var deathTimers = /* @__PURE__ */ new Map();
+var knownEntities = /* @__PURE__ */ new Set();
+var firstDrawTime = 0;
+var healParticles = [];
+var lastSelfHp = -1;
 var SPAWN_DURATION = 500;
 var DEATH_DURATION = 600;
 function drawEntities(ctx, state2, camX, camY, screenW, screenH) {
@@ -1400,132 +2342,6 @@ function triggerDeathAnimation(x, y, kind) {
   const id = -(Date.now() + Math.random() * 1e3);
   deathTimers.set(id, { start: Date.now(), x, y, kind });
 }
-function drawLionSpawn(ctx, x, y, entity, progress) {
-  const eased = easeOutQuart(progress);
-  ctx.save();
-  ctx.translate(x, y);
-  const dustAlpha = 1 - eased;
-  ctx.globalAlpha = dustAlpha * 0.6;
-  ctx.fillStyle = "#aa8844";
-  for (let i = 0; i < 6; i++) {
-    const angle = i / 6 * Math.PI * 2;
-    const dist = 15 * (1 - eased * 0.5);
-    const size = 8 - eased * 4;
-    ctx.beginPath();
-    ctx.arc(Math.cos(angle) * dist, Math.sin(angle) * dist, size, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = eased;
-  ctx.save();
-  const scale = 0.3 + eased * 0.7;
-  ctx.scale(scale, scale);
-  ctx.translate(-x, -y);
-  ctx.restore();
-  ctx.restore();
-  ctx.save();
-  ctx.globalAlpha = eased;
-  drawLion(ctx, x, y, entity);
-  ctx.restore();
-}
-function drawGhostSpawn(ctx, x, y, entity, progress) {
-  const eased = easeOutQuart(progress);
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.globalAlpha = (1 - eased) * 0.5;
-  ctx.strokeStyle = "#8899cc";
-  ctx.lineWidth = 2;
-  for (let i = 0; i < 4; i++) {
-    const angle = i / 4 * Math.PI * 2 + progress * Math.PI * 4;
-    const dist = 20 * (1 - eased);
-    ctx.beginPath();
-    ctx.arc(Math.cos(angle) * dist, Math.sin(angle) * dist, 5 * (1 - eased), 0, Math.PI * 2);
-    ctx.stroke();
-  }
-  ctx.globalAlpha = eased * 0.3;
-  ctx.fillStyle = "#aabbee";
-  ctx.beginPath();
-  ctx.arc(0, 0, 20 * (1 - eased * 0.5), 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-  ctx.save();
-  ctx.globalAlpha = eased;
-  const yOffset = 15 * (1 - eased);
-  drawGhost(ctx, x, y + yOffset, entity);
-  ctx.restore();
-}
-function drawLionDeath(ctx, x, y, progress) {
-  const eased = easeOutQuart(progress);
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.globalAlpha = (1 - eased) * 0.7;
-  ctx.fillStyle = "#aa8844";
-  for (let i = 0; i < 8; i++) {
-    const angle = i / 8 * Math.PI * 2 + i * 0.3;
-    const dist = eased * 25;
-    const size = 4 * (1 - eased);
-    ctx.beginPath();
-    ctx.arc(Math.cos(angle) * dist, Math.sin(angle) * dist, size, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = (1 - eased) * 0.5;
-  ctx.fillStyle = "#c4873a";
-  for (let i = 0; i < 5; i++) {
-    const angle = i / 5 * Math.PI * 2;
-    const dist = eased * 15;
-    ctx.beginPath();
-    ctx.arc(Math.cos(angle) * dist, Math.sin(angle) * dist - eased * 10, 3 * (1 - eased), 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = Math.max(0, (progress - 0.3) / 0.7) * (1 - eased);
-  ctx.fillStyle = "#ffdd44";
-  for (let i = 0; i < 3; i++) {
-    const yOff = -eased * 20 - i * 5;
-    ctx.beginPath();
-    ctx.arc((i - 1) * 6, yOff, 2 * (1 - eased), 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-function drawGhostDeath(ctx, x, y, progress) {
-  const eased = easeOutQuart(progress);
-  ctx.save();
-  ctx.translate(x, y);
-  for (let i = 0; i < 6; i++) {
-    const angle = i / 6 * Math.PI * 2 + progress * Math.PI;
-    const dist = eased * 30;
-    const size = 5 * (1 - eased);
-    ctx.globalAlpha = (1 - eased) * 0.4;
-    ctx.fillStyle = "#d0daf0";
-    ctx.beginPath();
-    ctx.arc(Math.cos(angle) * dist, Math.sin(angle) * dist, size, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = (1 - eased) * 0.6;
-  ctx.fillStyle = "#d0daf0";
-  const shrink = 1 - eased;
-  ctx.beginPath();
-  ctx.arc(0, 0, 10 * shrink, 0, Math.PI * 2);
-  ctx.fill();
-  if (progress < 0.7) {
-    const eyeAlpha = (0.7 - progress) / 0.7;
-    ctx.globalAlpha = eyeAlpha * 0.9;
-    ctx.fillStyle = "#3344aa";
-    ctx.beginPath();
-    ctx.arc(-4.5, -4, 3 * shrink, 0, Math.PI * 2);
-    ctx.arc(4.5, -4, 3 * shrink, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = (1 - eased) * 0.3;
-  ctx.fillStyle = "#8899cc";
-  for (let i = 0; i < 3; i++) {
-    const dropX = (i - 1) * 7;
-    const dropY = eased * 25 + i * 3;
-    ctx.beginPath();
-    ctx.ellipse(dropX, dropY, 2 * (1 - eased), 4 * (1 - eased), 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
-}
 function drawSelf(ctx, state2) {
   if (state2.selfDead) {
     lastSelfHp = -1;
@@ -1617,31 +2433,6 @@ function drawSelf(ctx, state2) {
   }
   if (state2.selfParryActive) {
     drawParryEffect(ctx, state2.selfPos.x, state2.selfPos.y, state2.selfFacing);
-  }
-  const now = Date.now();
-  const cooldownRemaining = state2.selfShieldCooldownUntil - now;
-  if (cooldownRemaining > 0) {
-    const ratio = cooldownRemaining / SHIELD_COOLDOWN;
-    ctx.save();
-    ctx.translate(state2.selfPos.x, state2.selfPos.y);
-    ctx.strokeStyle = "rgba(100, 180, 255, 0.4)";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(0, 18, 8, -Math.PI / 2, -Math.PI / 2 + (1 - ratio) * Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
-  }
-  const parryCdRemaining = state2.selfParryCooldownUntil - now;
-  if (parryCdRemaining > 0) {
-    const ratio = parryCdRemaining / PARRY_COOLDOWN;
-    ctx.save();
-    ctx.translate(state2.selfPos.x, state2.selfPos.y);
-    ctx.strokeStyle = "rgba(255, 200, 60, 0.4)";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(0, 22, 6, -Math.PI / 2, -Math.PI / 2 + (1 - ratio) * Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
   }
   drawAttackEffect(ctx, state2.selfPos.x, state2.selfPos.y, state2.selfAnim, state2.selfFacing, state2.myId);
 }
@@ -2109,600 +2900,6 @@ function drawAttackEffect(ctx, x, y, anim, facing, entityId) {
   ctx.globalAlpha = 1;
   ctx.restore();
 }
-function drawLion(ctx, x, y, entity) {
-  const time = Date.now() / 1e3;
-  const facing = entity.facing ?? 0;
-  const facingRight = Math.cos(facing) >= 0;
-  const anim = entity.anim;
-  const isWindup = anim === "windup";
-  const isPounce = anim === "pounce";
-  const isSwipe = anim === "punch";
-  const isCrouch = anim === "crouch";
-  const gallopFps = 10;
-  const { frame: gFrame, sub: gSub } = getFrameInfo(time, gallopFps, 6);
-  let bob, fLegY, bLegY, headBob, tailY;
-  if (isWindup) {
-    const pulse = Math.sin(time * 12) * 0.3;
-    bob = 4 + pulse;
-    fLegY = 2;
-    bLegY = 2;
-    headBob = 3;
-    tailY = -3;
-  } else if (isPounce) {
-    bob = -5;
-    fLegY = -4;
-    bLegY = 3;
-    headBob = -4;
-    tailY = 4;
-  } else if (isSwipe) {
-    bob = 1;
-    fLegY = -2;
-    bLegY = 1;
-    headBob = -1;
-    tailY = 2;
-  } else if (isCrouch) {
-    const breathe = Math.sin(time * 3) * 0.5;
-    bob = 5 + breathe;
-    fLegY = 3;
-    bLegY = 3;
-    headBob = 4;
-    tailY = -2;
-  } else {
-    bob = keyLerp(LION_GALLOP.bodyBob, gFrame, gSub);
-    fLegY = keyLerp(LION_GALLOP.frontLegAngle, gFrame, gSub) * 4;
-    bLegY = keyLerp(LION_GALLOP.backLegAngle, gFrame, gSub) * 4;
-    headBob = keyLerp(LION_GALLOP.headBob, gFrame, gSub);
-    tailY = keyLerp(LION_GALLOP.tailAngle, gFrame, gSub) * 6;
-  }
-  const O = "#1a1008";
-  const BODY = "#d4a030";
-  const BODY_HI = "#e8c050";
-  const BODY_SH = "#b08020";
-  const MANE = "#7a3c14";
-  const MANE_D = "#4c2408";
-  ctx.save();
-  ctx.translate(x, y);
-  if (!facingRight) ctx.scale(-1, 1);
-  ctx.fillStyle = "rgba(0,0,0,0.12)";
-  ctx.beginPath();
-  ctx.ellipse(0, 12 + bob * 0.3, 12, 3, 0, 0, Math.PI * 2);
-  ctx.fill();
-  if (isWindup) {
-    const pulse = 0.5 + Math.sin(time * 14) * 0.3;
-    ctx.fillStyle = `rgba(255, 80, 20, ${pulse * 0.3})`;
-    ctx.beginPath();
-    ctx.ellipse(0, 10, 16 + pulse * 3, 6, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = `rgba(255, 120, 40, ${pulse * 0.5})`;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.ellipse(0, 10, 16 + pulse * 3, 6, 0, 0, Math.PI * 2);
-    ctx.stroke();
-  }
-  if (isPounce) {
-    ctx.strokeStyle = "rgba(200, 160, 60, 0.4)";
-    ctx.lineWidth = 1.5;
-    for (let i = 0; i < 3; i++) {
-      const lx = -14 - i * 6;
-      const ly = -2 + i * 4;
-      ctx.beginPath();
-      ctx.moveTo(lx, ly);
-      ctx.lineTo(lx - 8, ly + 1);
-      ctx.stroke();
-    }
-  }
-  if (isSwipe) {
-    const swipeT = time * 1e3 % 250 / 250;
-    const sweep = Math.min(1, swipeT * 1.8);
-    const fade = 1 - Math.max(0, (swipeT - 0.5) / 0.5);
-    ctx.lineCap = "round";
-    for (let i = -1; i <= 1; i++) {
-      const baseX = 14;
-      const baseY = -7 + i * 7;
-      const scratchLen = 14 * sweep;
-      ctx.strokeStyle = `rgba(220, 60, 10, ${0.6 * fade})`;
-      ctx.lineWidth = 5;
-      ctx.beginPath();
-      ctx.moveTo(baseX, baseY);
-      ctx.lineTo(baseX + scratchLen, baseY + scratchLen * 0.5);
-      ctx.stroke();
-      ctx.strokeStyle = `rgba(255, 250, 200, ${0.9 * fade})`;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(baseX, baseY);
-      ctx.lineTo(baseX + scratchLen, baseY + scratchLen * 0.5);
-      ctx.stroke();
-    }
-  }
-  const tailBaseX = -9;
-  const tailTipX = tailBaseX - 10;
-  const tailTipY = bob - 4 + tailY;
-  ctx.strokeStyle = O;
-  ctx.lineWidth = 3;
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.moveTo(tailBaseX, bob + 1);
-  ctx.lineTo(tailTipX, tailTipY);
-  ctx.stroke();
-  ctx.strokeStyle = BODY;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(tailBaseX, bob + 1);
-  ctx.lineTo(tailTipX, tailTipY);
-  ctx.stroke();
-  ctx.fillStyle = MANE_D;
-  ctx.fillRect(tailTipX - 2, tailTipY - 2, 4, 4);
-  const legW = 4;
-  const legH = 7;
-  ctx.fillStyle = BODY_SH;
-  ctx.fillRect(-8, 3 + bob + bLegY * 0.3, legW, legH - bLegY * 0.15);
-  ctx.fillRect(4, 3 + bob + fLegY * 0.3, legW, legH - fLegY * 0.15);
-  ctx.fillStyle = O;
-  ctx.fillRect(-8, 3 + bob + legH + bLegY * 0.15, legW, 2);
-  ctx.fillRect(4, 3 + bob + legH + fLegY * 0.15, legW, 2);
-  ctx.save();
-  ctx.translate(0, bob);
-  ctx.fillStyle = O;
-  ctx.beginPath();
-  ctx.roundRect(-11, -6, 22, 14, 3);
-  ctx.fill();
-  ctx.fillStyle = BODY;
-  ctx.beginPath();
-  ctx.roundRect(-10, -5, 20, 12, 2);
-  ctx.fill();
-  ctx.fillStyle = BODY_HI;
-  ctx.fillRect(-8, -4, 16, 4);
-  ctx.fillStyle = BODY_SH;
-  ctx.fillRect(-8, 3, 16, 3);
-  ctx.restore();
-  ctx.fillStyle = BODY;
-  ctx.fillRect(-6, 3 + bob + bLegY * 0.3, legW, legH - bLegY * 0.15);
-  ctx.fillRect(6, 3 + bob + fLegY * 0.3, legW, legH - fLegY * 0.15);
-  ctx.fillStyle = O;
-  ctx.fillRect(-6, 3 + bob + legH + bLegY * 0.15, legW, 2);
-  ctx.fillRect(6, 3 + bob + legH + fLegY * 0.15, legW, 2);
-  const mX = 7;
-  const mY = -5 + bob + headBob;
-  ctx.fillStyle = O;
-  ctx.beginPath();
-  ctx.roundRect(mX - 9, mY - 8, 18, 17, 4);
-  ctx.fill();
-  ctx.fillStyle = MANE_D;
-  ctx.beginPath();
-  ctx.roundRect(mX - 8, mY - 7, 16, 15, 3);
-  ctx.fill();
-  ctx.fillStyle = MANE;
-  ctx.beginPath();
-  ctx.roundRect(mX - 6, mY - 5, 12, 11, 2);
-  ctx.fill();
-  const hX = 11;
-  const hY = -3 + bob + headBob;
-  ctx.fillStyle = O;
-  ctx.beginPath();
-  ctx.roundRect(hX - 6, hY - 5, 12, 11, 3);
-  ctx.fill();
-  ctx.fillStyle = BODY;
-  ctx.beginPath();
-  ctx.roundRect(hX - 5, hY - 4, 10, 9, 2);
-  ctx.fill();
-  ctx.fillStyle = BODY_HI;
-  ctx.fillRect(hX - 4, hY - 3, 8, 3);
-  ctx.fillStyle = O;
-  ctx.fillRect(hX - 4, hY - 8, 4, 4);
-  ctx.fillStyle = MANE;
-  ctx.fillRect(hX - 3, hY - 7, 2, 2);
-  ctx.fillStyle = "#d4977a";
-  ctx.fillRect(hX - 3, hY - 6, 1, 1);
-  ctx.fillStyle = BODY_HI;
-  ctx.beginPath();
-  ctx.roundRect(hX + 4, hY - 1, 5, 4, 1);
-  ctx.fill();
-  ctx.fillStyle = "#cc7788";
-  ctx.fillRect(hX + 7, hY - 1, 2, 2);
-  ctx.fillStyle = O;
-  ctx.fillRect(hX + 7, hY - 1, 2, 1);
-  ctx.fillStyle = O;
-  ctx.fillRect(hX + 5, hY + 3, 3, 1);
-  ctx.fillStyle = "#f0efe8";
-  ctx.fillRect(hX + 6, hY + 3, 1, 2);
-  const eyeW = isWindup ? 4 : isPounce || isSwipe ? 3 : isCrouch ? 3 : 3;
-  const eyeH = isWindup ? 3 : isPounce ? 1 : isSwipe ? 1 : isCrouch ? 1 : 2;
-  ctx.fillStyle = "#f8f4e0";
-  ctx.fillRect(hX + 1, hY - 3, eyeW, eyeH);
-  ctx.fillStyle = "#c08820";
-  ctx.fillRect(hX + 2, hY - 3, 2, eyeH);
-  ctx.fillStyle = O;
-  ctx.fillRect(hX + 3, hY - 3, 1, eyeH);
-  ctx.fillStyle = O;
-  ctx.fillRect(hX, hY - 4, eyeW + 1, 1);
-  ctx.restore();
-  ctx.save();
-  ctx.translate(x, y);
-  if (entity.hp !== void 0 && entity.maxHp !== void 0) {
-    drawHpBar(ctx, 0, -18, entity.hp, entity.maxHp);
-  }
-  ctx.restore();
-}
-function drawGhost(ctx, x, y, entity) {
-  const time = Date.now() / 1e3;
-  const facing = entity.facing ?? 0;
-  const anim = entity.anim;
-  const isWindup = anim === "windup";
-  const isFiring = anim === "shoot";
-  const isPhased = anim === "shield";
-  const floatFps = 3;
-  const { frame: fFrame, sub: fSub } = getFrameInfo(time, floatFps, 4);
-  const bob = keyLerp(GHOST_FLOAT.bob, fFrame, fSub);
-  const bodyScale = keyLerp(GHOST_FLOAT.bodyScale, fFrame, fSub);
-  const tendrilW = keyLerp(GHOST_FLOAT.tendrilW, fFrame, fSub);
-  const eyeScale = keyLerp(GHOST_FLOAT.eyeSquint, fFrame, fSub);
-  ctx.save();
-  if (isPhased) {
-    ctx.globalAlpha = 0.18 + Math.sin(time * 10) * 0.08;
-  }
-  const shakeX = isWindup ? Math.sin(time * 60) * 3 : isPhased ? Math.sin(time * 12) * 2 : 0;
-  const shakeY = isWindup ? Math.cos(time * 45) * 2 : isPhased ? Math.cos(time * 9) * 1.5 : 0;
-  ctx.translate(x + shakeX, y + bob + shakeY);
-  if (isPhased) {
-    ctx.save();
-    ctx.globalAlpha = 0.12 + Math.sin(time * 4) * 0.06;
-    ctx.fillStyle = "#8899cc";
-    ctx.beginPath();
-    ctx.ellipse(0, -2, 18 + Math.sin(time * 3) * 3, 22 + Math.cos(time * 2.5) * 3, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-  const wispDirX = -Math.cos(facing);
-  const wispDirY = -Math.sin(facing);
-  ctx.fillStyle = "#8899cc";
-  for (let i = 0; i < 5; i++) {
-    const wispFrame = stepFrame(time + i * 0.3, 4, 3);
-    const baseX = wispDirX * (8 + i * 4) + (wispFrame - 1) * 2;
-    const baseY = 12 + i * 3 + wispDirY * (4 + i * 2) + wispFrame * 1.5;
-    const wSize = 3.5 - i * 0.4;
-    ctx.globalAlpha = 0.15 - i * 0.02;
-    ctx.beginPath();
-    ctx.arc(baseX, baseY, wSize, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = 0.06 + (fFrame === 1 ? 0.04 : 0);
-  ctx.fillStyle = "#aabbee";
-  ctx.beginPath();
-  ctx.arc(0, 0, 20, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.globalAlpha = 0.55 + fFrame % 2 * 0.1;
-  ctx.fillStyle = "#d0daf0";
-  ctx.save();
-  ctx.scale(1 / bodyScale, bodyScale);
-  ctx.beginPath();
-  ctx.moveTo(0, -14);
-  ctx.bezierCurveTo(-13, -8, -11, 8, -9, 12);
-  const t1 = tendrilW;
-  const t2 = -tendrilW * 0.8;
-  const t3 = tendrilW * 0.6;
-  ctx.lineTo(-7, 14 + t1);
-  ctx.lineTo(-4, 10 + t2);
-  ctx.lineTo(-1, 16 + t3);
-  ctx.lineTo(2, 10 + t1);
-  ctx.lineTo(5, 14 + t2);
-  ctx.lineTo(8, 11 + t3);
-  ctx.lineTo(9, 12);
-  ctx.bezierCurveTo(11, 8, 13, -8, 0, -14);
-  ctx.fill();
-  ctx.restore();
-  ctx.globalAlpha = 0.15 + (fFrame === 0 ? 0.1 : 0);
-  ctx.fillStyle = "#eef2ff";
-  ctx.beginPath();
-  ctx.ellipse(0, -2, 7, 9, 0, 0, Math.PI * 2);
-  ctx.fill();
-  if (isPhased) {
-    ctx.save();
-    ctx.globalAlpha = 0.3 + Math.sin(time * 5) * 0.15;
-    ctx.strokeStyle = "#6666cc";
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([3, 5]);
-    ctx.beginPath();
-    const ringRadius = 16 + Math.sin(time * 3) * 3;
-    ctx.arc(0, -3, ringRadius, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    for (let i = 0; i < 4; i++) {
-      const angle = time * 2 + i * Math.PI / 2;
-      const dist = 12 + Math.sin(time * 4 + i) * 5;
-      const px = Math.cos(angle) * dist;
-      const py = Math.sin(angle) * dist - 3;
-      ctx.globalAlpha = 0.2 + Math.sin(time * 6 + i * 2) * 0.15;
-      ctx.fillStyle = "#aabbff";
-      ctx.beginPath();
-      ctx.arc(px, py, 1.5, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.restore();
-  }
-  const eyeDirX = Math.cos(facing) * 3.5;
-  const eyeDirY = Math.sin(facing) * 2.5;
-  const scary = isWindup || isFiring;
-  ctx.globalAlpha = isPhased ? 0.4 : 0.9;
-  ctx.fillStyle = scary ? "#2a0808" : "#1a2244";
-  const socketScale = scary ? 1.3 : 1;
-  ctx.beginPath();
-  ctx.ellipse(-4.5, -4, 4 * socketScale, 4.5 * eyeScale * socketScale, -0.1, 0, Math.PI * 2);
-  ctx.ellipse(4.5, -4, 4 * socketScale, 4.5 * eyeScale * socketScale, 0.1, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = scary ? "#cc2200" : "#3344aa";
-  ctx.beginPath();
-  ctx.ellipse(-4.5 + eyeDirX * 0.3, -4 + eyeDirY * 0.3, 3.5 * socketScale, 4 * eyeScale * socketScale, -0.1, 0, Math.PI * 2);
-  ctx.ellipse(4.5 + eyeDirX * 0.3, -4 + eyeDirY * 0.3, 3.5 * socketScale, 4 * eyeScale * socketScale, 0.1, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = scary ? "#ff4400" : "#112266";
-  ctx.beginPath();
-  ctx.arc(-4.5 + eyeDirX, -3.5 + eyeDirY, scary ? 2.5 : 2, 0, Math.PI * 2);
-  ctx.arc(4.5 + eyeDirX, -3.5 + eyeDirY, scary ? 2.5 : 2, 0, Math.PI * 2);
-  ctx.fill();
-  if (scary) {
-    ctx.fillStyle = "#1a0808";
-    ctx.globalAlpha = 0.8;
-    ctx.beginPath();
-    ctx.ellipse(0, 4, 5, 3 + Math.sin(time * 20) * 1, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.fillStyle = scary ? "#ff8866" : "#eef4ff";
-  ctx.globalAlpha = 0.95;
-  ctx.beginPath();
-  ctx.arc(-4.5 + eyeDirX * 0.8, -4.5 + eyeDirY * 0.6, 1.5, 0, Math.PI * 2);
-  ctx.arc(4.5 + eyeDirX * 0.8, -4.5 + eyeDirY * 0.6, 1.5, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.globalAlpha = 1;
-  if (entity.hp !== void 0 && entity.maxHp !== void 0) {
-    drawHpBar(ctx, 0, -20 - bob, entity.hp, entity.maxHp);
-  }
-  ctx.restore();
-}
-function drawStag(ctx, x, y, entity) {
-  ctx.save();
-  ctx.translate(x, y);
-  const facing = entity.facing ?? 0;
-  const time = Date.now() / 1e3;
-  ctx.rotate(facing);
-  const strideFps = 6;
-  const { frame: sFrame, sub: sSub } = getFrameInfo(time, strideFps, 4);
-  const sBob = keyLerp(STAG_STRIDE.bodyBob, sFrame, sSub);
-  const sStretchX = keyLerp(STAG_STRIDE.bodyStretchX, sFrame, sSub);
-  const sStretchY = keyLerp(STAG_STRIDE.bodyStretchY, sFrame, sSub);
-  const sFLeg = keyLerp(STAG_STRIDE.frontLegFwd, sFrame, sSub);
-  const sBLeg = keyLerp(STAG_STRIDE.backLegFwd, sFrame, sSub);
-  const sHead = keyLerp(STAG_STRIDE.headDip, sFrame, sSub);
-  const sFlame = keyLerp(STAG_STRIDE.flamePulse, sFrame, sSub);
-  const contactPulse = sFrame === 0 || sFrame === 2 ? 0.06 : 0;
-  ctx.globalAlpha = 0.1 + contactPulse;
-  ctx.fillStyle = "#ff4400";
-  ctx.beginPath();
-  ctx.arc(0, 0, 32, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.globalAlpha = 0.05 + contactPulse * 0.5;
-  ctx.fillStyle = "#ff6600";
-  ctx.beginPath();
-  ctx.arc(0, 0, 38, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = "#ff4400";
-  for (let i = 0; i < 5; i++) {
-    const eFrame = stepFrame(time + i * 0.4, 3, 4);
-    const angles = [0.3, 1.1, 2.2, 3.5, 4.8];
-    const ex = Math.cos(angles[i] + eFrame * 0.5) * 20;
-    const ey = Math.sin(angles[i] + eFrame * 0.7) * 14;
-    ctx.globalAlpha = eFrame === 0 ? 0.5 : 0.2;
-    ctx.beginPath();
-    ctx.arc(ex, ey, 1.5, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
-  ctx.strokeStyle = "#5c2f0f";
-  ctx.lineWidth = 2.5;
-  ctx.lineCap = "round";
-  const fKneeX = 8 + sFLeg * 0.5;
-  const fFootX = 6 + sFLeg;
-  ctx.beginPath();
-  ctx.moveTo(6, 10);
-  ctx.lineTo(fKneeX, 14 + sBob * 0.5);
-  ctx.lineTo(fFootX, 18 + sBob);
-  ctx.moveTo(12, 10);
-  ctx.lineTo(fKneeX + 5, 14 - sBob * 0.3);
-  ctx.lineTo(fFootX + 5, 18 - sBob * 0.5);
-  ctx.stroke();
-  const bKneeX = -8 + sBLeg * 0.5;
-  const bFootX = -10 + sBLeg;
-  ctx.beginPath();
-  ctx.moveTo(-4, 11);
-  ctx.lineTo(bKneeX, 14 - sBob * 0.5);
-  ctx.lineTo(bFootX, 18 - sBob);
-  ctx.moveTo(-10, 10);
-  ctx.lineTo(bKneeX - 5, 14 + sBob * 0.3);
-  ctx.lineTo(bFootX - 5, 18 + sBob * 0.5);
-  ctx.stroke();
-  ctx.fillStyle = "#3a1a08";
-  ctx.beginPath();
-  ctx.arc(fFootX, 18 + sBob, 2, 0, Math.PI * 2);
-  ctx.arc(fFootX + 5, 18 - sBob * 0.5, 2, 0, Math.PI * 2);
-  ctx.arc(bFootX, 18 - sBob, 2, 0, Math.PI * 2);
-  ctx.arc(bFootX - 5, 18 + sBob * 0.5, 2, 0, Math.PI * 2);
-  ctx.fill();
-  if (sFrame === 0 || sFrame === 2) {
-    ctx.globalAlpha = 0.15;
-    ctx.fillStyle = "#aa7744";
-    const dustX = sFrame === 0 ? fFootX : bFootX;
-    ctx.beginPath();
-    ctx.arc(dustX, 20 + sBob, 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 1;
-  }
-  ctx.save();
-  ctx.translate(0, sBob);
-  ctx.scale(sStretchX, sStretchY);
-  ctx.fillStyle = "#6b3410";
-  ctx.beginPath();
-  ctx.ellipse(0, 0, 18, 12, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = "#ff440044";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(-6, -4);
-  ctx.lineTo(-2, 2);
-  ctx.lineTo(4, -1);
-  ctx.moveTo(2, 3);
-  ctx.lineTo(8, 5);
-  ctx.stroke();
-  ctx.fillStyle = "#7a3c14";
-  ctx.beginPath();
-  ctx.ellipse(2, -3, 10, 5, 0.2, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-  const neckY = sBob + sHead;
-  ctx.fillStyle = "#7a3c14";
-  ctx.beginPath();
-  ctx.ellipse(14 * sStretchX, -2 + neckY, 7, 6, -0.3, 0, 0, Math.PI * 2);
-  ctx.fill();
-  const headX = 22 * sStretchX;
-  const headY = -2 + neckY + sHead;
-  ctx.fillStyle = "#8b4513";
-  ctx.beginPath();
-  ctx.ellipse(headX, headY, 6, 5, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#6b3410";
-  ctx.beginPath();
-  ctx.ellipse(headX + 5, headY + 1, 3, 3, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#3a1a08";
-  ctx.beginPath();
-  ctx.arc(headX + 6.5, headY, 1, 0, Math.PI * 2);
-  ctx.arc(headX + 6.5, headY + 2, 1, 0, Math.PI * 2);
-  ctx.fill();
-  const smokeFrame = stepFrame(time, 5, 3);
-  ctx.globalAlpha = 0.25 - smokeFrame * 0.06;
-  ctx.strokeStyle = "#aa4400";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(headX + 8, headY);
-  ctx.lineTo(headX + 10 + smokeFrame * 3, headY - 2 - smokeFrame * 2);
-  ctx.stroke();
-  ctx.globalAlpha = 1;
-  ctx.strokeStyle = "#d4a055";
-  ctx.lineWidth = 2.5;
-  ctx.lineCap = "round";
-  const antlerBaseX = headX - 3;
-  const antlerBaseY = headY;
-  ctx.beginPath();
-  ctx.moveTo(antlerBaseX, antlerBaseY - 4);
-  ctx.lineTo(antlerBaseX - 5, antlerBaseY - 18);
-  ctx.lineTo(antlerBaseX - 9, antlerBaseY - 26);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(antlerBaseX - 5, antlerBaseY - 18);
-  ctx.lineTo(antlerBaseX - 1, antlerBaseY - 24);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(antlerBaseX - 3, antlerBaseY - 12);
-  ctx.lineTo(antlerBaseX - 9, antlerBaseY - 16);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(antlerBaseX, antlerBaseY + 4);
-  ctx.lineTo(antlerBaseX - 5, antlerBaseY + 18);
-  ctx.lineTo(antlerBaseX - 9, antlerBaseY + 26);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(antlerBaseX - 5, antlerBaseY + 18);
-  ctx.lineTo(antlerBaseX - 1, antlerBaseY + 24);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(antlerBaseX - 3, antlerBaseY + 12);
-  ctx.lineTo(antlerBaseX - 9, antlerBaseY + 16);
-  ctx.stroke();
-  const tipGlow = sFrame % 2 === 0 ? 0.5 : 0.3;
-  ctx.globalAlpha = tipGlow;
-  ctx.fillStyle = "#ff6600";
-  ctx.beginPath();
-  ctx.arc(antlerBaseX - 9, antlerBaseY - 26, 2.5, 0, Math.PI * 2);
-  ctx.arc(antlerBaseX - 9, antlerBaseY + 26, 2.5, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = "#ff6600";
-  ctx.shadowColor = "#ff4400";
-  ctx.shadowBlur = 8;
-  ctx.beginPath();
-  ctx.arc(headX + 1, headY - 3, 2.2, 0, Math.PI * 2);
-  ctx.arc(headX + 1, headY + 3, 2.2, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = "#ffcc00";
-  ctx.beginPath();
-  ctx.arc(headX + 1.5, headY - 3, 1, 0, Math.PI * 2);
-  ctx.arc(headX + 1.5, headY + 3, 1, 0, Math.PI * 2);
-  ctx.fill();
-  const flameScale = sFlame;
-  ctx.save();
-  ctx.translate(-18 * sStretchX, sBob);
-  ctx.scale(flameScale, flameScale);
-  const flameFrame = stepFrame(time, 8, 3);
-  const flameOffsets = [[0, -2, 3], [1, -3, 1], [-1, -1, 2]][flameFrame];
-  ctx.fillStyle = "#ff4400";
-  ctx.globalAlpha = 0.8;
-  ctx.beginPath();
-  ctx.moveTo(0, -2);
-  ctx.lineTo(-8 + flameOffsets[0], -4 + flameOffsets[1]);
-  ctx.lineTo(-5, 0 + flameOffsets[2]);
-  ctx.lineTo(-9 + flameOffsets[0], 3 + flameOffsets[1]);
-  ctx.lineTo(0, 2);
-  ctx.fill();
-  ctx.fillStyle = "#ffaa22";
-  ctx.globalAlpha = 0.7;
-  ctx.beginPath();
-  ctx.moveTo(0, -1);
-  ctx.lineTo(-4 + flameOffsets[0], -2 + flameOffsets[2] * 0.5);
-  ctx.lineTo(-2, 0);
-  ctx.lineTo(-4 + flameOffsets[0], 1 + flameOffsets[1] * 0.5);
-  ctx.lineTo(0, 1);
-  ctx.fill();
-  ctx.globalAlpha = 1;
-  ctx.restore();
-  ctx.restore();
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.fillStyle = "#ff4400";
-  ctx.font = "bold 12px sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText("BOSS", 0, -34);
-  if (entity.hp !== void 0 && entity.maxHp !== void 0) {
-    const w = 44;
-    const h = 4;
-    const ratio = Math.max(0, entity.hp / entity.maxHp);
-    ctx.fillStyle = "rgba(0,0,0,0.7)";
-    ctx.fillRect(-w / 2, -30, w, h);
-    ctx.fillStyle = ratio > 0.5 ? "#ff6600" : ratio > 0.25 ? "#ff3300" : "#ff0000";
-    ctx.fillRect(-w / 2, -30, w * ratio, h);
-  }
-  ctx.restore();
-}
-function drawHpBar(ctx, x, y, hp, maxHp) {
-  const w = 24;
-  const h = 3;
-  const ratio = Math.max(0, hp / maxHp);
-  ctx.fillStyle = "rgba(0,0,0,0.5)";
-  ctx.fillRect(x - w / 2, y, w, h);
-  ctx.fillStyle = ratio > 0.5 ? "#4caf50" : ratio > 0.25 ? "#ff9800" : "#f44336";
-  ctx.fillRect(x - w / 2, y, w * ratio, h);
-}
-var darkenCache = /* @__PURE__ */ new Map();
-function darkenColor(hex, factor) {
-  const key = hex + factor;
-  let result = darkenCache.get(key);
-  if (result) return result;
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  result = `rgb(${Math.floor(r * (1 - factor))},${Math.floor(g * (1 - factor))},${Math.floor(b * (1 - factor))})`;
-  darkenCache.set(key, result);
-  return result;
-}
 
 // client/src/rendering/BuildingRenderer.ts
 var BUILDING_COLORS = {
@@ -3076,6 +3273,7 @@ function drawHud(ctx, state2, canvas) {
     }
   }
   drawMinimap(ctx, state2, canvas);
+  drawCooldownBars(ctx, state2, canvas);
 }
 function drawMinimap(ctx, state2, canvas) {
   const isMobile = document.body.classList.contains("mobile");
@@ -3177,6 +3375,57 @@ function drawMinimap(ctx, state2, canvas) {
     ctx.restore();
   }
 }
+var ABILITY_SLOTS = [
+  { label: "PUNCH", key: "LMB", color: "#ff6b6b", getCooldownUntil: (s) => s.selfPunchCooldownUntil, maxCooldown: PUNCH_COOLDOWN },
+  { label: "LUNGE", key: "Shift", color: "#ff9544", getCooldownUntil: (s) => s.selfLungeCooldownUntil, maxCooldown: LUNGE_COOLDOWN },
+  { label: "SHOOT", key: "RMB", color: "#c77dff", getCooldownUntil: (s) => s.selfArrowCooldownUntil, maxCooldown: ARROW_COOLDOWN },
+  { label: "PARRY", key: "F", color: "#ffd740", getCooldownUntil: (s) => s.selfParryCooldownUntil, maxCooldown: PARRY_COOLDOWN },
+  { label: "SHIELD", key: "Space", color: "#6496ff", getCooldownUntil: (s) => s.selfShieldCooldownUntil, maxCooldown: SHIELD_COOLDOWN },
+  { label: "DASH", key: "Q", color: "#7ec87e", getCooldownUntil: (s) => s.selfDashCooldownUntil, maxCooldown: DASH_COOLDOWN }
+];
+function drawCooldownBars(ctx, state2, canvas) {
+  if (state2.selfDead) return;
+  const now = Date.now();
+  const slotW = 52;
+  const slotH = 6;
+  const gap = 3;
+  const totalW = ABILITY_SLOTS.length * slotW + (ABILITY_SLOTS.length - 1) * gap;
+  const barY = canvas.height - 100;
+  const startX = (canvas.width - totalW) / 2;
+  ctx.save();
+  for (let i = 0; i < ABILITY_SLOTS.length; i++) {
+    const slot = ABILITY_SLOTS[i];
+    const x = startX + i * (slotW + gap);
+    const cdUntil = slot.getCooldownUntil(state2);
+    const remaining = cdUntil - now;
+    const onCooldown = remaining > 0;
+    const ratio = onCooldown ? Math.min(1, remaining / slot.maxCooldown) : 0;
+    ctx.fillStyle = "rgba(0,0,0,0.5)";
+    ctx.fillRect(x, barY, slotW, slotH);
+    if (onCooldown) {
+      ctx.fillStyle = "rgba(40,40,40,0.6)";
+      ctx.fillRect(x, barY, slotW, slotH);
+      const readyW = slotW * (1 - ratio);
+      ctx.fillStyle = slot.color;
+      ctx.globalAlpha = 0.7;
+      ctx.fillRect(x, barY, readyW, slotH);
+      ctx.globalAlpha = 1;
+    } else {
+      ctx.fillStyle = slot.color;
+      ctx.globalAlpha = 0.8;
+      ctx.fillRect(x, barY, slotW, slotH);
+      ctx.globalAlpha = 1;
+    }
+    ctx.strokeStyle = onCooldown ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.25)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, barY, slotW, slotH);
+    ctx.font = "bold 8px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = onCooldown ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.7)";
+    ctx.fillText(slot.label, x + slotW / 2, barY - 3);
+  }
+  ctx.restore();
+}
 
 // client/src/ui/BuildMenu.ts
 var BUILD_COSTS = { wall: WALL_COST, gate: GATE_COST, turret: TURRET_COST, bed: BED_COST };
@@ -3241,7 +3490,23 @@ var Renderer = class {
     const mouseWorldY = mouse.y - canvas.height / 2 + cam.y;
     drawBuildings(ctx, state2, mouseWorldX, mouseWorldY);
     if (this.input.buildMode) {
-      drawBuildPreview(ctx, this.input.buildMode, mouseWorldX, mouseWorldY, state2.selfPos.x, state2.selfPos.y, state2.selfSource);
+      const isGamepad = this.input.gamepad.enabled && this.input.gamepad.connected;
+      if (this.input.isMobile && !isGamepad) {
+        this.drawBuildRangeOverlay(ctx, state2.selfPos.x, state2.selfPos.y, canvas.width, canvas.height, cam);
+        const preview = this.input.mobileBuildPreview;
+        if (preview) {
+          const previewWorldX = preview.cellX * CELL_SIZE + CELL_SIZE / 2;
+          const previewWorldY = preview.cellY * CELL_SIZE + CELL_SIZE / 2;
+          drawBuildPreview(ctx, this.input.buildMode, previewWorldX, previewWorldY, state2.selfPos.x, state2.selfPos.y, state2.selfSource);
+        }
+      } else if (isGamepad) {
+        this.drawBuildRangeOverlay(ctx, state2.selfPos.x, state2.selfPos.y, canvas.width, canvas.height, cam);
+        const gpWorldX = state2.selfPos.x + this.input.gamepadBuildOffsetX;
+        const gpWorldY = state2.selfPos.y + this.input.gamepadBuildOffsetY;
+        drawBuildPreview(ctx, this.input.buildMode, gpWorldX, gpWorldY, state2.selfPos.x, state2.selfPos.y, state2.selfSource);
+      } else {
+        drawBuildPreview(ctx, this.input.buildMode, mouseWorldX, mouseWorldY, state2.selfPos.x, state2.selfPos.y, state2.selfSource);
+      }
     }
     this.drawNPCs(ctx);
     drawProjectiles(ctx, state2, cam.x, cam.y, canvas.width, canvas.height);
@@ -3277,7 +3542,7 @@ var Renderer = class {
   drawNPCs(ctx) {
     this.drawBanker(ctx, BANKER_POS.x, BANKER_POS.y);
     this.drawScribe(ctx, SCRIBE_POS.x, SCRIBE_POS.y);
-    const gamepadActive = document.body.classList.contains("gamepad-active") || this.input.gamepad.connected && !this.input.isMobile;
+    const gamepadActive = document.body.classList.contains("gamepad-active");
     const showTextPrompts = !this.input.isMobile || gamepadActive;
     const interactKey = gamepadActive ? "[A]" : "Press E to";
     if (showTextPrompts) {
@@ -3511,6 +3776,27 @@ var Renderer = class {
     }
     ctx.globalAlpha = 1;
   }
+  drawBuildRangeOverlay(ctx, px, py, canvasW, canvasH, cam) {
+    const radius = MAX_BUILD_RANGE;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(cam.x - canvasW, cam.y - canvasH, canvasW * 2, canvasH * 2);
+    ctx.arc(px, py, radius, 0, Math.PI * 2, true);
+    ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(px, py, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(240, 200, 60, 0.6)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(px, py, radius, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(240, 200, 60, 0.04)";
+    ctx.fill();
+    ctx.restore();
+  }
   drawNightOverlay(ctx, canvas) {
     switch (this.state.dayPhase) {
       case "night":
@@ -3541,6 +3827,7 @@ function setupLobby(onJoin, serverUrl) {
   const shirtColor = document.getElementById("shirt-color");
   const pantsColor = document.getElementById("pants-color");
   const playBtn = document.getElementById("play-btn");
+  const passwordInput = document.getElementById("server-password");
   const errorMsg = document.getElementById("error-msg");
   const preview = document.getElementById("char-preview");
   function drawPreview() {
@@ -3579,6 +3866,16 @@ function setupLobby(onJoin, serverUrl) {
   skinColor.addEventListener("input", drawPreview);
   shirtColor.addEventListener("input", drawPreview);
   pantsColor.addEventListener("input", drawPreview);
+  const randomizeBtn = document.getElementById("randomize-btn");
+  if (randomizeBtn) {
+    randomizeBtn.addEventListener("click", () => {
+      const randHex = () => "#" + Math.floor(Math.random() * 16777215).toString(16).padStart(6, "0");
+      skinColor.value = randHex();
+      shirtColor.value = randHex();
+      pantsColor.value = randHex();
+      drawPreview();
+    });
+  }
   function doJoin() {
     const username = usernameInput.value.trim();
     if (!username) {
@@ -3602,6 +3899,7 @@ function setupLobby(onJoin, serverUrl) {
     localStorage.setItem("plainscape_skin", skinColor.value);
     localStorage.setItem("plainscape_shirt", shirtColor.value);
     localStorage.setItem("plainscape_pants", pantsColor.value);
+    const pw = passwordInput?.value || void 0;
     onJoin({
       token,
       username,
@@ -3609,7 +3907,8 @@ function setupLobby(onJoin, serverUrl) {
         skin: skinColor.value,
         shirt: shirtColor.value,
         pants: pantsColor.value
-      }
+      },
+      password: pw
     });
   }
   playBtn.addEventListener("click", doJoin);
@@ -3795,7 +4094,14 @@ function showWinnerModal(winnerName, topSuggestion, onSubmit) {
       suggBox.style.display = "none";
     }
   }
-  if (inputRef) inputRef.modalOpen = true;
+  if (inputRef) {
+    inputRef.modalOpen = true;
+    if (inputRef.gamepad.enabled && inputRef.gamepad.connected) {
+      const inner = modal.querySelector(".winner-inner") || modal;
+      inputRef.menuNav.activate(inner, () => {
+      });
+    }
+  }
   const newBtn = submitBtn.cloneNode(true);
   submitBtn.parentNode.replaceChild(newBtn, submitBtn);
   newBtn.addEventListener("click", () => {
@@ -3816,7 +4122,10 @@ function showWinnerModal(winnerName, topSuggestion, onSubmit) {
 function hideWinnerModal() {
   const modal = document.getElementById("winner-modal");
   if (modal) modal.style.display = "none";
-  if (inputRef) inputRef.modalOpen = false;
+  if (inputRef) {
+    inputRef.modalOpen = false;
+    inputRef.menuNav.deactivate();
+  }
 }
 
 // client/src/ui/Chat.ts
@@ -3850,7 +4159,7 @@ function applyCensorFilter(text) {
   if (!censorEnabled) return text;
   return text.replace(PROFANITY_REGEX, (match) => "*".repeat(match.length));
 }
-function addChatMessage(username, text) {
+function addChatMessage(username, text, whisper) {
   messageHistory.push({ username, text });
   if (messageHistory.length > HISTORY_SIZE) {
     messageHistory.shift();
@@ -3859,9 +4168,10 @@ function addChatMessage(username, text) {
   if (!container) return;
   const div = document.createElement("div");
   div.className = "chat-msg";
+  if (whisper) div.classList.add("chat-whisper");
   const nameSpan = document.createElement("span");
   nameSpan.className = "chat-name";
-  nameSpan.textContent = username + ": ";
+  nameSpan.textContent = (whisper ? "[Whisper] " : "") + username + ": ";
   div.appendChild(nameSpan);
   div.appendChild(document.createTextNode(text));
   container.appendChild(div);
@@ -3939,11 +4249,16 @@ function setupStatsPanel(conn2, input2, state2) {
     input2.statsOpen = true;
     panel.style.display = "flex";
     buildRows();
+    if (input2.gamepad.enabled && input2.gamepad.connected) {
+      const inner = panel.querySelector(".stats-inner") || panel;
+      input2.menuNav.activate(inner, closePanel);
+    }
   }
   function closePanel() {
     panelOpen = false;
     input2.statsOpen = false;
     panel.style.display = "none";
+    input2.menuNav.deactivate();
   }
   function buildRows() {
     rowsContainer.textContent = "";
@@ -3995,6 +4310,12 @@ function setupStatsPanel(conn2, input2, state2) {
 }
 
 // client/src/ui/NpcPanels.ts
+function activateMenuNav(input2, panel, closeFn) {
+  if (input2.gamepad.enabled && input2.gamepad.connected) {
+    const inner = panel.querySelector(".npc-inner, .sign-inner") || panel;
+    input2.menuNav.activate(inner, closeFn);
+  }
+}
 var bankOpen = false;
 var scribeOpen = false;
 var signOpen = false;
@@ -4040,33 +4361,39 @@ function setupNpcPanels(conn2, input2, state2) {
     input2.statsOpen = true;
     bankPanel.style.display = "flex";
     renderBank();
+    activateMenuNav(input2, bankPanel, closeBankPanel);
   }
   function closeBankPanel() {
     bankOpen = false;
     input2.statsOpen = false;
     bankPanel.style.display = "none";
+    input2.menuNav.deactivate();
   }
   function openScribePanel() {
     scribeOpen = true;
     input2.statsOpen = true;
     scribePanel.style.display = "flex";
     renderScribe();
+    activateMenuNav(input2, scribePanel, closeScribePanel);
   }
   function closeScribePanel() {
     scribeOpen = false;
     input2.statsOpen = false;
     scribePanel.style.display = "none";
+    input2.menuNav.deactivate();
   }
   function openSignPanel(kind) {
     signOpen = true;
     input2.statsOpen = true;
     signPanel.style.display = "flex";
     renderSign(kind);
+    activateMenuNav(input2, signPanel, closeSignPanel);
   }
   function closeSignPanel() {
     signOpen = false;
     input2.statsOpen = false;
     signPanel.style.display = "none";
+    input2.menuNav.deactivate();
   }
   function renderSign(kind) {
     const inner = signPanel.querySelector(".sign-inner");
@@ -4113,7 +4440,8 @@ function setupNpcPanels(conn2, input2, state2) {
         entry.className = "sign-entry";
         const text = document.createElement("div");
         text.className = "sign-entry-item";
-        text.textContent = `"${rule.text}"`;
+        const plain = rule.text.replace(/\*\*(.+?)\*\*/g, "$1").replace(/\*(.+?)\*/g, "$1").replace(/__(.+?)__/g, "$1").replace(/_(.+?)_/g, "$1");
+        text.textContent = `"${plain}"`;
         text.style.color = "#ddd";
         entry.appendChild(text);
         const author = document.createElement("div");
@@ -4249,7 +4577,10 @@ function setupNpcPanels(conn2, input2, state2) {
   const origOnSuggestionsUpdate = state2.onSuggestionsUpdate;
   state2.onSuggestionsUpdate = () => {
     if (origOnSuggestionsUpdate) origOnSuggestionsUpdate();
-    if (scribeOpen) renderScribe();
+    if (scribeOpen) {
+      renderScribe();
+      if (input2.menuNav.active) input2.menuNav.rescan();
+    }
   };
 }
 
@@ -4269,12 +4600,17 @@ function setupWhitelistPanel(conn2, input2) {
     titleEl.textContent = `${btype.charAt(0).toUpperCase() + btype.slice(1)} Whitelist`;
     panel.style.display = "flex";
     renderSlots(whitelist, ownerName);
+    if (input2.gamepad.enabled && input2.gamepad.connected) {
+      const inner = panel.querySelector(".npc-inner") || panel;
+      input2.menuNav.activate(inner, close);
+    }
   }
   function close() {
     panelOpen2 = false;
     input2.modalOpen = false;
     panel.style.display = "none";
     currentBuildingId = null;
+    input2.menuNav.deactivate();
   }
   function renderSlots(names, ownerName) {
     namesDiv.textContent = "";
@@ -4440,9 +4776,10 @@ function updateFeedStrip() {
   }
 }
 setInterval(updateFeedStrip, 1e3);
-function addMobileChatMessage(username, text) {
+function addMobileChatMessage(username, text, whisper) {
   if (!isMobileDevice) return;
-  addToFeed(`<span class="chat-name">${escapeHtml(username)}:</span> ${escapeHtml(text)}`);
+  const prefix = whisper ? '<span class="chat-whisper-label">[Whisper] </span>' : "";
+  addToFeed(`${prefix}<span class="chat-name">${escapeHtml(username)}:</span> ${escapeHtml(text)}`);
 }
 function addMobileNotification(text, cssClass) {
   if (!isMobileDevice) return;
@@ -4697,10 +5034,24 @@ function setupCanvasTouch(input2, state2, conn2) {
       const margin2 = 120;
       if (t.clientX < margin2 || t.clientX > canvas.width - margin2) return;
       e.preventDefault();
-      if (input2.buildMode && input2.onBuild) {
-        input2.onBuild(input2.buildMode, t.clientX, t.clientY);
-      } else if (input2.demolishMode && input2.onDemolish) {
+      if (input2.demolishMode && input2.onDemolish) {
         input2.onDemolish(t.clientX, t.clientY);
+        return;
+      }
+      if (input2.buildMode) {
+        const worldX = t.clientX - canvas.width / 2 + state2.cameraX;
+        const worldY = t.clientY - canvas.height / 2 + state2.cameraY;
+        const cellX = Math.floor(worldX / CELL_SIZE);
+        const cellY = Math.floor(worldY / CELL_SIZE);
+        const prev = input2.mobileBuildPreview;
+        if (prev && prev.cellX === cellX && prev.cellY === cellY) {
+          if (input2.onBuild) {
+            input2.onBuild(input2.buildMode, t.clientX, t.clientY);
+          }
+          input2.mobileBuildPreview = null;
+        } else {
+          input2.mobileBuildPreview = { cellX, cellY };
+        }
       }
       return;
     }
@@ -4787,6 +5138,10 @@ function setupServerBrowser(onServerSelected) {
 }
 var REGISTRY_URL = "https://plainscape.world";
 async function fetchServers() {
+  const refreshBtn = document.getElementById("refresh-servers-btn");
+  if (refreshBtn) {
+    refreshBtn.classList.add("spinning");
+  }
   try {
     const url = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" ? "/api/servers" : `${REGISTRY_URL}/api/servers`;
     const res = await fetch(url);
@@ -4794,10 +5149,17 @@ async function fetchServers() {
     const servers = await res.json();
     renderServerList(servers);
   } catch {
+  } finally {
+    if (refreshBtn) {
+      setTimeout(() => refreshBtn.classList.remove("spinning"), 600);
+    }
   }
 }
 function openCommunityServer(url) {
   window.location.href = url;
+}
+function isMainServer(server) {
+  return server.host === window.location.hostname || server.host === "localhost" || server.host === "127.0.0.1" || server.name.includes("Official");
 }
 function renderServerList(servers) {
   const tbody = document.getElementById("server-rows");
@@ -4811,17 +5173,36 @@ function renderServerList(servers) {
     }
     const nameCell = document.createElement("td");
     nameCell.textContent = server.name;
-    if (server.hasPassword) nameCell.textContent += " \u{1F512}";
     row.appendChild(nameCell);
     const playersCell = document.createElement("td");
     playersCell.textContent = `${server.playerCount}/${server.maxPlayers}`;
     row.appendChild(playersCell);
+    const pwCell = document.createElement("td");
+    pwCell.style.textAlign = "center";
+    pwCell.textContent = server.hasPassword ? "\u{1F512}" : "";
+    row.appendChild(pwCell);
+    const modCell = document.createElement("td");
+    modCell.style.textAlign = "center";
+    if (server.isModded) {
+      const badge = document.createElement("span");
+      badge.textContent = "Modded";
+      badge.style.cssText = "font-size:11px;color:#c9a84c;background:rgba(201,168,76,0.12);padding:2px 6px;border-radius:4px;";
+      modCell.appendChild(badge);
+    }
+    row.appendChild(modCell);
+    const pingCell = document.createElement("td");
+    pingCell.style.textAlign = "center";
+    if (isMainServer(server)) {
+      pingCell.textContent = "\u2014";
+    } else {
+      pingCell.textContent = server.ping != null ? `${server.ping}ms` : "\u2014";
+    }
+    row.appendChild(pingCell);
     const descCell = document.createElement("td");
     descCell.textContent = server.description;
     row.appendChild(descCell);
     row.addEventListener("click", () => {
-      const isMainServer2 = server.host === window.location.hostname || server.host === "localhost" || server.host === "127.0.0.1" || server.name.includes("Official");
-      if (isMainServer2) {
+      if (isMainServer(server)) {
         onSelect?.(null);
       } else {
         openCommunityServer(`http://${server.host}:${server.port}`);
@@ -4837,6 +5218,33 @@ var renderer;
 var input;
 var conn;
 var running = false;
+function generateFingerprint() {
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = 200;
+    canvas.height = 50;
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.textBaseline = "top";
+      ctx.font = "14px Arial";
+      ctx.fillStyle = "#f60";
+      ctx.fillRect(10, 1, 62, 20);
+      ctx.fillStyle = "#069";
+      ctx.fillText("PlainScape:fp", 2, 15);
+    }
+    const canvasData = canvas.toDataURL();
+    const raw = canvasData + "|" + screen.width + "x" + screen.height + "|" + navigator.userAgent + "|" + navigator.language + "|" + (/* @__PURE__ */ new Date()).getTimezoneOffset();
+    let hash = 0;
+    for (let i = 0; i < raw.length; i++) {
+      const c = raw.charCodeAt(i);
+      hash = (hash << 5) - hash + c;
+      hash |= 0;
+    }
+    return Math.abs(hash).toString(36);
+  } catch {
+    return "";
+  }
+}
 function updatePartyButton() {
   const btn = document.getElementById("party-btn");
   if (btn) btn.style.display = state.partyMembers.length > 0 ? "block" : "none";
@@ -4876,6 +5284,10 @@ function handleMessage(msg) {
         snap.selfShieldCooldownUntil,
         snap.selfParryActive,
         snap.selfParryCooldownUntil,
+        snap.selfPunchCooldownUntil,
+        snap.selfLungeCooldownUntil,
+        snap.selfArrowCooldownUntil,
+        snap.selfDashCooldownUntil,
         snap.selfStatLevels,
         snap.selfBankedSource,
         snap.selfBuildingCount
@@ -4890,7 +5302,8 @@ function handleMessage(msg) {
       } else {
         addEventMessage(msg.message, msg.kind);
         let evtClass = "";
-        if (msg.kind === "party") evtClass = "notif-party";
+        if (msg.kind === "phase") evtClass = "notif-phase";
+        else if (msg.kind === "party") evtClass = "notif-party";
         else if (msg.message.includes("+") && msg.message.includes("Source")) evtClass = "notif-source";
         else if (msg.message.includes("killed") || msg.message.includes("Destroyed")) evtClass = "notif-kill";
         addMobileNotification(msg.message, evtClass);
@@ -4933,8 +5346,8 @@ function handleMessage(msg) {
     }
     case "chat_broadcast": {
       const filtered = applyCensorFilter(msg.text);
-      addChatMessage(msg.username, filtered);
-      addMobileChatMessage(msg.username, filtered);
+      addChatMessage(msg.username, filtered, msg.whisper);
+      addMobileChatMessage(msg.username, filtered, msg.whisper);
       break;
     }
     case "notification": {
@@ -4946,7 +5359,7 @@ function handleMessage(msg) {
       break;
     }
     case "online_list": {
-      updateOnlineList(msg.usernames);
+      updateOnlineList(msg.usernames, msg.admins);
       break;
     }
     case "rule_status": {
@@ -5025,7 +5438,9 @@ function addEventMessage(text, kind) {
   if (!feed) return;
   const el = document.createElement("div");
   el.className = "notif-msg";
-  if (kind === "party") {
+  if (kind === "phase") {
+    el.classList.add("notif-phase");
+  } else if (kind === "party") {
     el.classList.add("notif-party");
   } else if (text.includes("+") && text.includes("Source")) {
     el.classList.add("notif-source");
@@ -5043,8 +5458,10 @@ function addEventMessage(text, kind) {
 }
 var onlineExpanded = false;
 var lastOnlineList = [];
-function updateOnlineList(usernames) {
+var lastAdminList = [];
+function updateOnlineList(usernames, admins) {
   lastOnlineList = usernames;
+  if (admins) lastAdminList = admins;
   updateMobileLb(state.leaderboard, state.selfUsername, usernames);
   const list = document.getElementById("online-list");
   const count = document.getElementById("online-count");
@@ -5053,11 +5470,18 @@ function updateOnlineList(usernames) {
   while (list.firstChild) list.removeChild(list.firstChild);
   const limit = onlineExpanded ? usernames.length : 10;
   const visible = usernames.slice(0, limit);
+  const adminSet = new Set(lastAdminList);
   for (const name of visible) {
     const el = document.createElement("div");
     el.className = "online-name";
     if (name === state?.selfUsername) el.classList.add("online-self");
     el.textContent = name;
+    if (adminSet.has(name)) {
+      const badge = document.createElement("span");
+      badge.className = "online-admin";
+      badge.textContent = " (Admin)";
+      el.appendChild(badge);
+    }
     list.appendChild(el);
   }
   if (usernames.length > 10) {
@@ -5087,6 +5511,36 @@ function startGameLoop() {
     setupMobileHud(conn, input, state);
   }
   setupControllerConfig(input);
+  {
+    let closeHtp2 = function() {
+      htpModal.classList.remove("open");
+      input.modalOpen = false;
+      input.menuNav.deactivate();
+      if (input.menuOpen && input.gamepad.enabled && input.gamepad.connected) {
+        const escMenu = document.getElementById("esc-menu");
+        if (escMenu) {
+          const panel = escMenu.querySelector(".menu-panel") || escMenu;
+          input.menuNav.activate(panel, () => input.toggleMenu());
+        }
+      }
+    };
+    var closeHtp = closeHtp2;
+    const htpModal = document.getElementById("htp-modal");
+    const htpOpenBtns = document.querySelectorAll(".htp-btn");
+    const htpCloseBtn = htpModal.querySelector(".htp-close");
+    for (const btn of htpOpenBtns) {
+      btn.addEventListener("click", () => {
+        input.modalOpen = true;
+        if (input.gamepad.enabled && input.gamepad.connected) {
+          const panel = htpModal.querySelector(".htp-panel") || htpModal;
+          input.menuNav.activate(panel, closeHtp2);
+        }
+      });
+    }
+    if (htpCloseBtn) {
+      htpCloseBtn.addEventListener("click", closeHtp2);
+    }
+  }
   document.getElementById("chat-toggle").addEventListener("click", () => {
     const container = document.getElementById("chat-container");
     const icon = document.getElementById("chat-toggle-icon");
@@ -5102,6 +5556,12 @@ function startGameLoop() {
   document.getElementById("online-toggle").addEventListener("click", () => {
     const container = document.getElementById("online-container");
     const icon = document.getElementById("online-toggle-icon");
+    container.classList.toggle("collapsed");
+    icon.textContent = container.classList.contains("collapsed") ? "\u25B6" : "\u25BC";
+  });
+  document.getElementById("lb-toggle").addEventListener("click", () => {
+    const container = document.getElementById("leaderboard");
+    const icon = document.getElementById("lb-toggle-icon");
     container.classList.toggle("collapsed");
     icon.textContent = container.classList.contains("collapsed") ? "\u25B6" : "\u25BC";
   });
@@ -5129,6 +5589,44 @@ function startGameLoop() {
       );
     }
     if (bestEntity.kind === "player" && bestEntity.id !== state.myId && bestEntity.username) {
+      conn.send({ type: "party_invite", targetUsername: bestEntity.username });
+    }
+  };
+  input.onTargetLock = (facing) => {
+    const px = state.selfPos.x;
+    const py = state.selfPos.y;
+    const maxDist = CELL_SIZE * 2;
+    const coneHalf = Math.PI / 4;
+    let bestDist = maxDist;
+    let bestEntity = null;
+    for (const [, e] of state.entities) {
+      if (e.id === state.myId) continue;
+      const pos = state.getInterpolatedPos(e.id);
+      if (!pos) continue;
+      const dx = pos.x - px;
+      const dy = pos.y - py;
+      const dist = Math.hypot(dx, dy);
+      if (dist > maxDist || dist < 1) continue;
+      const angle = Math.atan2(dy, dx);
+      let diff = angle - facing;
+      while (diff > Math.PI) diff -= 2 * Math.PI;
+      while (diff < -Math.PI) diff += 2 * Math.PI;
+      if (Math.abs(diff) > coneHalf) continue;
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestEntity = e;
+      }
+    }
+    if (!bestEntity) return;
+    if (bestEntity.kind === "building" && (bestEntity.btype === "gate" || bestEntity.btype === "turret") && bestEntity.ownerName === state.selfUsername) {
+      openWhitelistPanel(
+        bestEntity.id,
+        bestEntity.btype,
+        bestEntity.whitelist || [],
+        bestEntity.ownerName || ""
+      );
+    }
+    if (bestEntity.kind === "player" && bestEntity.username) {
       conn.send({ type: "party_invite", targetUsername: bestEntity.username });
     }
   };
@@ -5281,7 +5779,7 @@ function setupControllerConfig(inputHandler) {
   if (inputHandler.isMobile) {
     touchToggleLabel.style.display = "";
   }
-  enabledCheckbox.checked = localStorage.getItem("plainscape_gamepad_enabled") !== "false";
+  enabledCheckbox.checked = localStorage.getItem("plainscape_gamepad_enabled") === "true";
   hideTouchCheckbox.checked = localStorage.getItem("plainscape_hide_touch") === "true";
   gp.enabled = enabledCheckbox.checked;
   if (inputHandler.touch) {
@@ -5352,19 +5850,38 @@ function setupControllerConfig(inputHandler) {
       bindingsDiv.appendChild(row);
     }
   }
-  openBtn.addEventListener("click", () => {
+  function openControllerModal() {
     modal.classList.add("open");
+    inputHandler.modalOpen = true;
     renderBindings();
-  });
-  closeBtn.addEventListener("click", () => {
+    if (gp.enabled && gp.connected) {
+      const inner = modal.querySelector(".controller-inner") || modal;
+      inputHandler.menuNav.activate(inner, closeControllerModal);
+    }
+  }
+  function closeControllerModal() {
     modal.classList.remove("open");
-  });
+    inputHandler.modalOpen = false;
+    inputHandler.menuNav.deactivate();
+    if (inputHandler.menuOpen && gp.enabled && gp.connected) {
+      const escMenu = document.getElementById("esc-menu");
+      if (escMenu) {
+        const panel = escMenu.querySelector(".menu-panel") || escMenu;
+        inputHandler.menuNav.activate(panel, () => inputHandler.toggleMenu());
+      }
+    }
+  }
+  openBtn.addEventListener("click", openControllerModal);
+  closeBtn.addEventListener("click", closeControllerModal);
   resetBtn.addEventListener("click", () => {
     gp.resetBindings();
     renderBindings();
+    if (inputHandler.menuNav.active) {
+      setTimeout(() => inputHandler.menuNav.rescan(), 50);
+    }
   });
   modal.addEventListener("click", (e) => {
-    if (e.target === modal) modal.classList.remove("open");
+    if (e.target === modal) closeControllerModal();
   });
 }
 var GWL_SLOTS = 10;
@@ -5379,10 +5896,15 @@ function setupGlobalWhitelist(connection, inputHandler) {
     modal.classList.add("open");
     inputHandler.modalOpen = true;
     renderSlots();
+    if (inputHandler.gamepad.enabled && inputHandler.gamepad.connected) {
+      const inner = modal.querySelector(".gwl-inner") || modal;
+      inputHandler.menuNav.activate(inner, closeModal);
+    }
   }
   function closeModal() {
     modal.classList.remove("open");
     inputHandler.modalOpen = false;
+    inputHandler.menuNav.deactivate();
   }
   function renderSlots() {
     slotsDiv.textContent = "";
@@ -5421,7 +5943,7 @@ function setupGlobalWhitelist(connection, inputHandler) {
 if (detectMobile()) {
   document.body.classList.add("mobile");
 }
-var isMainServer = window.__PLAINSCAPE_MAIN_SERVER__ === true;
+var isMainServer2 = window.__PLAINSCAPE_MAIN_SERVER__ === true;
 var selectedServerUrl;
 function startLobbyFlow(serverUrl) {
   selectedServerUrl = serverUrl;
@@ -5442,12 +5964,16 @@ function startLobbyFlow(serverUrl) {
       subtitleEl?.parentElement?.appendChild(nameEl);
     }
   }
+  const pwField = document.getElementById("server-password");
+  if (pwField && window.__SERVER_HAS_PASSWORD__) {
+    pwField.style.display = "";
+  }
   const joinScreen = document.getElementById("join-screen");
   if (joinScreen) joinScreen.style.display = "flex";
   const backBtn = document.getElementById("back-to-browser");
   if (backBtn) {
     backBtn.style.display = "";
-    if (isMainServer) {
+    if (isMainServer2) {
       backBtn.textContent = "Server Browser";
       backBtn.onclick = () => {
         if (joinScreen) joinScreen.style.display = "none";
@@ -5470,14 +5996,16 @@ function startLobbyFlow(serverUrl) {
         type: "join",
         token: data.token,
         username: data.username,
-        colors: data.colors
+        colors: data.colors,
+        fingerprint: generateFingerprint(),
+        password: data.password
       });
     } catch (err) {
       showError("Failed to connect to server");
     }
   }, serverUrl);
 }
-if (isMainServer) {
+if (isMainServer2) {
   const joinScreen = document.getElementById("join-screen");
   if (joinScreen) joinScreen.style.display = "none";
   const browserEl = document.getElementById("server-browser");

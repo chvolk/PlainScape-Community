@@ -1,6 +1,6 @@
 // server/src/main.ts
-import path5 from "path";
-import { readFileSync } from "fs";
+import path7 from "path";
+import { readFileSync as readFileSync2 } from "fs";
 
 // server/src/utils/IdGenerator.ts
 var nextId = 1;
@@ -149,7 +149,8 @@ var SOURCE_WALK_INTERVAL = 5e3;
 var SOURCE_WALK_AMOUNT = 1;
 var SOURCE_DEATH_AMOUNT = 3;
 var SOURCE_LION_KILL_AMOUNT = 7;
-var SOURCE_GHOST_KILL_AMOUNT = 8;
+var SOURCE_GHOST_KILL_AMOUNT = 7;
+var SOURCE_TRANSITION_BONUS = 2;
 var SOURCE_STAG_KILL_AMOUNT = 400;
 var SOURCE_PLAYER_KILL_AMOUNT = 20;
 var SOURCE_BUILDING_DESTROY = 5;
@@ -190,8 +191,10 @@ var STAT_INCREMENTS = {
   // +4 units per level (base 160)
   shieldDuration: 300,
   // +300ms per level (base 2000ms)
-  knockback: 5
+  knockback: 5,
   // +5 units per level (base 20)
+  dashDist: 3.2
+  // +3.2 units per level (base 64) — +80 at max = ~2.5 tiles
 };
 var STAT_NAMES = [
   "moveSpeed",
@@ -202,7 +205,8 @@ var STAT_NAMES = [
   "lungeAoe",
   "lungeDist",
   "shieldDuration",
-  "knockback"
+  "knockback",
+  "dashDist"
 ];
 var MAX_PARTY_SIZE = 10;
 var USERNAME_MAX_LENGTH = 20;
@@ -222,7 +226,8 @@ function defaultStatLevels() {
     lungeAoe: 0,
     lungeDist: 0,
     shieldDuration: 0,
-    knockback: 0
+    knockback: 0,
+    dashDist: 0
   };
 }
 
@@ -550,7 +555,8 @@ function tickMovement(players, enemies, chunks, delta) {
       player.y = oldY;
     }
     player.isMoving = player.x !== oldX || player.y !== oldY;
-    if (player.anim !== "parry" && player.anim !== "shield" && player.anim !== "dash") {
+    const anim = player.anim;
+    if (anim !== "parry" && anim !== "shield" && anim !== "dash") {
       if (player.isMoving) {
         player.anim = "walk";
       } else {
@@ -825,7 +831,7 @@ function onPlayerDisconnect(world2, player) {
   leaveParty(world2, player);
 }
 
-// server/src/systems/CombatSystem.ts
+// server/src/systems/CombatHelpers.ts
 function awardSource(player, amount, world2) {
   if (world2 && player.partyId !== null) {
     const members = getPartyMembers(world2, player);
@@ -848,6 +854,59 @@ function awardSource(player, amount, world2) {
   player.sourceFlushDirty += amount;
   if (player.partyId !== null) player.partySourceEarned += amount;
 }
+function killPlayer(world2, victim, killer) {
+  victim.dead = true;
+  victim.hp = 0;
+  victim.anim = "dead";
+  victim.shieldActive = false;
+  victim.respawnAt = Date.now() + RESPAWN_TIME;
+  const lostSource = victim.source;
+  if (killer && killer.kind === "player") {
+    const killerPlayer = killer;
+    const totalGain = SOURCE_PLAYER_KILL_AMOUNT + lostSource;
+    awardSource(killerPlayer, totalGain, world2);
+    world2.sendEvent(killerPlayer, "kill", `You killed ${victim.username}! +${totalGain} Source`);
+    victim.source = 0;
+    world2.sendEvent(victim, "death", `Killed by ${killerPlayer.username}! Lost ${lostSource} unbanked Source.`);
+    world2.broadcastAll({
+      type: "notification",
+      text: `${killerPlayer.username} killed ${victim.username}`
+    });
+  } else {
+    const lost = Math.floor(lostSource / 2);
+    victim.source -= lost;
+    awardSource(victim, SOURCE_DEATH_AMOUNT, world2);
+    world2.sendEvent(victim, "death", `You died! Lost ${lost} Source. +${SOURCE_DEATH_AMOUNT} Source`);
+    const killerKind = killer ? killer.kind : "the wilds";
+    world2.broadcastAll({
+      type: "notification",
+      text: `${victim.username} was killed by ${killerKind}`
+    });
+  }
+}
+function tickRespawns(world2) {
+  const now = Date.now();
+  for (const [, player] of world2.players) {
+    if (!player.dead || !player.respawnAt) continue;
+    if (now < player.respawnAt) continue;
+    const oldX = player.x;
+    const oldY = player.y;
+    if (player.bedX !== null && player.bedY !== null) {
+      player.x = player.bedX;
+      player.y = player.bedY;
+    } else {
+      player.x = (Math.random() - 0.5) * 200;
+      player.y = (Math.random() - 0.5) * 200;
+    }
+    world2.chunks.updateEntityChunk(player, oldX, oldY);
+    player.dead = false;
+    player.hp = PLAYER_HP;
+    player.respawnAt = null;
+    player.anim = "idle";
+  }
+}
+
+// server/src/systems/CombatSystem.ts
 function tickCombat(world2) {
   const now = Date.now();
   for (const [, player] of world2.players) {
@@ -883,8 +942,9 @@ function tickCombat(world2) {
         const len = Math.hypot(mdx, mdy);
         const nx = mdx / len;
         const ny = mdy / len;
+        const dashDist = DASH_DISTANCE + player.statLevels.dashDist * STAT_INCREMENTS.dashDist;
         const steps = 8;
-        const stepDist = DASH_DISTANCE / steps;
+        const stepDist = dashDist / steps;
         for (let i = 0; i < steps; i++) {
           const testX = player.x + nx * stepDist;
           const testY = player.y + ny * stepDist;
@@ -905,7 +965,7 @@ function tickCombat(world2) {
           player.x = testX;
           player.y = testY;
         }
-        world2.chunks.updateEntityChunk(player, player.x - nx * DASH_DISTANCE, player.y - ny * DASH_DISTANCE);
+        world2.chunks.updateEntityChunk(player, player.x - nx * dashDist, player.y - ny * dashDist);
         player.dashCooldownUntil = now + DASH_COOLDOWN;
         player.moveCooldownUntil = now + DASH_DURATION;
         player.anim = "dash";
@@ -999,9 +1059,13 @@ function performConeAttack(world2, attacker, facing, damage, range) {
         kind: "destroy",
         message: `__fx_explode_${Math.round(enemy.x)}_${Math.round(enemy.y)}_${enemy.kind}__`
       });
+      const phase = getDayPhase();
       let killReward = SOURCE_GHOST_KILL_AMOUNT;
       if (enemy.kind === "lion") {
         killReward = SOURCE_LION_KILL_AMOUNT;
+        if (phase === "dawn") killReward += SOURCE_TRANSITION_BONUS;
+      } else if (enemy.kind === "ghost") {
+        if (phase === "dusk") killReward += SOURCE_TRANSITION_BONUS;
       } else if (enemy.kind === "stag") {
         killReward = SOURCE_STAG_KILL_AMOUNT;
       }
@@ -1020,8 +1084,6 @@ function performConeAttack(world2, attacker, facing, damage, range) {
     if (other.parryActive) {
       const reflectDmg = Math.ceil(damage * PARRY_REFLECT_MULT);
       attacker.hp -= reflectDmg;
-      world2.sendEvent(other, "kill", `Parried ${attacker.username}'s attack! Reflected ${reflectDmg} damage!`);
-      world2.sendEvent(attacker, "death", `${other.username} parried your attack!`);
       if (attacker.hp <= 0) {
         killPlayer(world2, attacker, other);
       }
@@ -1103,9 +1165,13 @@ function performLunge(world2, player, facing) {
         kind: "destroy",
         message: `__fx_explode_${Math.round(enemy.x)}_${Math.round(enemy.y)}_${enemy.kind}__`
       });
+      const lungePhase = getDayPhase();
       let lungeKillReward = SOURCE_GHOST_KILL_AMOUNT;
       if (enemy.kind === "lion") {
         lungeKillReward = SOURCE_LION_KILL_AMOUNT;
+        if (lungePhase === "dawn") lungeKillReward += SOURCE_TRANSITION_BONUS;
+      } else if (enemy.kind === "ghost") {
+        if (lungePhase === "dusk") lungeKillReward += SOURCE_TRANSITION_BONUS;
       } else if (enemy.kind === "stag") {
         lungeKillReward = SOURCE_STAG_KILL_AMOUNT;
       }
@@ -1122,8 +1188,6 @@ function performLunge(world2, player, facing) {
     if (other.parryActive) {
       const reflectDmg = Math.ceil(LUNGE_DAMAGE * PARRY_REFLECT_MULT);
       player.hp -= reflectDmg;
-      world2.sendEvent(other, "kill", `Parried ${player.username}'s lunge! Reflected ${reflectDmg} damage!`);
-      world2.sendEvent(player, "death", `${other.username} parried your lunge!`);
       if (player.hp <= 0) {
         killPlayer(world2, player, other);
       }
@@ -1149,57 +1213,6 @@ function performLunge(world2, player, facing) {
     }
   }
 }
-function killPlayer(world2, victim, killer) {
-  victim.dead = true;
-  victim.hp = 0;
-  victim.anim = "dead";
-  victim.shieldActive = false;
-  victim.respawnAt = Date.now() + RESPAWN_TIME;
-  const lostSource = victim.source;
-  if (killer && killer.kind === "player") {
-    const killerPlayer = killer;
-    const totalGain = SOURCE_PLAYER_KILL_AMOUNT + lostSource;
-    awardSource(killerPlayer, totalGain, world2);
-    world2.sendEvent(killerPlayer, "kill", `You killed ${victim.username}! +${totalGain} Source`);
-    victim.source = 0;
-    world2.sendEvent(victim, "death", `Killed by ${killerPlayer.username}! Lost ${lostSource} unbanked Source.`);
-    world2.broadcastAll({
-      type: "notification",
-      text: `${killerPlayer.username} killed ${victim.username}`
-    });
-  } else {
-    const lost = Math.floor(lostSource / 2);
-    victim.source -= lost;
-    awardSource(victim, SOURCE_DEATH_AMOUNT, world2);
-    world2.sendEvent(victim, "death", `You died! Lost ${lost} Source. +${SOURCE_DEATH_AMOUNT} Source`);
-    const killerKind = killer ? killer.kind : "the wilds";
-    world2.broadcastAll({
-      type: "notification",
-      text: `${victim.username} was killed by ${killerKind}`
-    });
-  }
-}
-function tickRespawns(world2) {
-  const now = Date.now();
-  for (const [, player] of world2.players) {
-    if (!player.dead || !player.respawnAt) continue;
-    if (now < player.respawnAt) continue;
-    const oldX = player.x;
-    const oldY = player.y;
-    if (player.bedX !== null && player.bedY !== null) {
-      player.x = player.bedX;
-      player.y = player.bedY;
-    } else {
-      player.x = (Math.random() - 0.5) * 200;
-      player.y = (Math.random() - 0.5) * 200;
-    }
-    world2.chunks.updateEntityChunk(player, oldX, oldY);
-    player.dead = false;
-    player.hp = PLAYER_HP;
-    player.respawnAt = null;
-    player.anim = "idle";
-  }
-}
 
 // server/src/systems/ProjectileSystem.ts
 function applyEnemyHit(world2, proj, enemy) {
@@ -1221,9 +1234,13 @@ function applyEnemyHit(world2, proj, enemy) {
     if (proj.ownerType === "player") {
       const owner = world2.players.get(proj.ownerId);
       if (owner) {
+        const phase = getDayPhase();
         let reward = SOURCE_GHOST_KILL_AMOUNT;
         if (enemy.kind === "lion") {
           reward = SOURCE_LION_KILL_AMOUNT;
+          if (phase === "dawn") reward += SOURCE_TRANSITION_BONUS;
+        } else if (enemy.kind === "ghost") {
+          if (phase === "dusk") reward += SOURCE_TRANSITION_BONUS;
         } else if (enemy.kind === "stag") {
           reward = SOURCE_STAG_KILL_AMOUNT;
         }
@@ -1333,7 +1350,6 @@ function tickProjectiles(world2, delta) {
             proj.ownerType = "player";
             proj.parried = true;
             proj.createdAt = Date.now();
-            world2.sendEvent(player, "kill", "Parried a projectile!");
             break;
           }
           player.hp -= proj.damage;
@@ -1594,81 +1610,8 @@ var ScorchedStag = class extends Enemy {
   }
 };
 
-// server/src/systems/AISystem.ts
-function tickAI(world2, delta, doSeparation = true) {
-  for (const [, enemy] of world2.enemies) {
-    if (enemy.markedForRemoval) continue;
-    if (Date.now() < enemy.stunUntil) continue;
-    if (Math.hypot(enemy.x, enemy.y) < SAFE_ZONE_RADIUS) {
-      enemy.markedForRemoval = true;
-      world2.broadcastAll({
-        type: "event",
-        kind: "destroy",
-        message: `__fx_explode_${Math.round(enemy.x)}_${Math.round(enemy.y)}_${enemy.kind}__`
-      });
-      continue;
-    }
-    const target = findNearestPlayer(world2, enemy);
-    if (!target) {
-      wander(enemy, delta, world2);
-      enemy.aiState = "idle";
-      if (enemy instanceof Lion) {
-        enemy.speed = LION_SPEED;
-        enemy.chaseStartTime = 0;
-        enemy.chaseLionsSpawned = 0;
-      }
-      if (enemy instanceof Ghost) {
-        tickGhostPhase(enemy);
-      }
-      continue;
-    }
-    const dist = Math.hypot(target.x - enemy.x, target.y - enemy.y);
-    enemy.facing = Math.atan2(target.y - enemy.y, target.x - enemy.x);
-    if (enemy instanceof ScorchedStag) {
-      tickStag(world2, enemy, target, dist, delta);
-    } else if (enemy instanceof Lion) {
-      tickLion(world2, enemy, target, dist, delta);
-    } else if (enemy instanceof Ghost) {
-      tickGhost(world2, enemy, target, dist, delta);
-    }
-  }
-  if (doSeparation) {
-    const SEPARATION_DIST = 20;
-    for (const [, enemy] of world2.enemies) {
-      if (enemy.markedForRemoval) continue;
-      const nearby = world2.chunks.getNearbyEntities(enemy.x, enemy.y);
-      for (const other of nearby.enemies) {
-        if (other.id <= enemy.id || other.markedForRemoval) continue;
-        const dx = other.x - enemy.x;
-        const dy = other.y - enemy.y;
-        const d = Math.hypot(dx, dy);
-        if (d < SEPARATION_DIST && d > 0.1) {
-          const push = (SEPARATION_DIST - d) * 0.5;
-          const nx = dx / d;
-          const ny = dy / d;
-          const e1x = enemy.x - nx * push;
-          const e1y = enemy.y - ny * push;
-          if (!isInsideBuilding(e1x, e1y, world2)) {
-            enemy.x = e1x;
-            enemy.y = e1y;
-          }
-          const e2x = other.x + nx * push;
-          const e2y = other.y + ny * push;
-          if (!isInsideBuilding(e2x, e2y, world2)) {
-            other.x = e2x;
-            other.y = e2y;
-          }
-        }
-      }
-    }
-  }
-  for (const [, enemy] of world2.enemies) {
-    if (enemy.markedForRemoval) continue;
-    if (isInsideBuilding(enemy.x, enemy.y, world2)) {
-      pushOutOfBuilding(enemy, world2);
-    }
-  }
-}
+// server/src/systems/ai/AIHelpers.ts
+var BUILDING_ATTACK_COOLDOWN = 800;
 function isInsideBuilding(x, y, world2) {
   const half = 12;
   const minCX = Math.floor((x - half) / CELL_SIZE);
@@ -1703,80 +1646,89 @@ function pushOutOfBuilding(enemy, world2) {
     }
   }
 }
-function tickStag(world2, stag, target, dist, delta) {
+function wander(enemy, delta, world2) {
   const now = Date.now();
-  if (stag.charging) {
-    const elapsed = now - stag.chargeStartTime;
-    if (elapsed >= STAG_CHARGE_DURATION) {
-      stag.charging = false;
-      stag.speed = STAG_SPEED;
-      const nearby = world2.chunks.getEntitiesInRadius(stag.x, stag.y, STAG_MELEE_RANGE + 20);
+  if (now >= enemy.wanderNextChange) {
+    const distFromOrigin = Math.hypot(enemy.x, enemy.y);
+    const distFromEdge = distFromOrigin - SAFE_ZONE_RADIUS;
+    const awayFromOriginAngle = Math.atan2(enemy.y, enemy.x);
+    if (distFromEdge < 400) {
+      const urgency = 1 - Math.max(0, distFromEdge) / 400;
+      const spread = (1 - urgency) * Math.PI * 0.6;
+      enemy.wanderAngle = awayFromOriginAngle + (Math.random() - 0.5) * spread;
+    } else {
+      let angle = Math.random() * Math.PI * 2;
+      const nearby = world2.chunks.getNearbyEntities(enemy.x, enemy.y);
+      let nearestDist = Infinity;
+      let nearestAngle = angle;
       for (const player of nearby.players) {
-        if (player.dead || player.shieldActive) continue;
-        const pDist = Math.hypot(player.x - stag.x, player.y - stag.y);
-        if (pDist <= STAG_MELEE_RANGE + 20) {
-          player.hp -= STAG_CHARGE_DAMAGE;
-          if (player.hp <= 0) killPlayer(world2, player);
+        if (player.dead) continue;
+        const d = Math.hypot(player.x - enemy.x, player.y - enemy.y);
+        if (d < nearestDist && d < 800) {
+          nearestDist = d;
+          nearestAngle = Math.atan2(player.y - enemy.y, player.x - enemy.x);
         }
       }
-      stag.lastAttackTime = now;
-      return;
-    }
-    stag.speed = STAG_CHARGE_SPEED;
-    moveEnemy(stag, stag.chargeTargetX, stag.chargeTargetY, world2.chunks, delta);
-    stag.aiState = "attack";
-    return;
-  }
-  if (dist >= STAG_MELEE_RANGE && dist <= STAG_CHARGE_RANGE && now >= stag.lastChargeTime + STAG_CHARGE_COOLDOWN && now >= stag.lastAttackTime + 1e3) {
-    stag.charging = true;
-    stag.chargeStartTime = now;
-    stag.lastChargeTime = now;
-    stag.chargeTargetX = target.x;
-    stag.chargeTargetY = target.y;
-    stag.speed = STAG_CHARGE_SPEED;
-    stag.aiState = "attack";
-    return;
-  }
-  if (dist <= STAG_FIRE_BREATH_RANGE && now >= stag.lastFireBreathTime + STAG_FIRE_BREATH_COOLDOWN && now >= stag.lastAttackTime + 1e3) {
-    const dx = target.x - stag.x;
-    const dy = target.y - stag.y;
-    const d = Math.hypot(dx, dy) || 1;
-    const baseAngle = Math.atan2(dy, dx);
-    const speed = 180;
-    for (let i = -1; i <= 1; i++) {
-      const angle = baseAngle + i * 0.15;
-      const vx = Math.cos(angle) * speed;
-      const vy = Math.sin(angle) * speed;
-      const proj = new Projectile(stag.x, stag.y, vx, vy, STAG_FIRE_BREATH_DAMAGE, stag.id, "enemy");
-      proj.visualSource = "stag";
-      proj.ttl = 1500;
-      proj.aoeRadius = STAG_FIRE_BREATH_AOE_RADIUS;
-      world2.addProjectile(proj);
-    }
-    stag.lastFireBreathTime = now;
-    stag.lastAttackTime = now;
-  }
-  if (dist > STAG_MELEE_RANGE + 10) {
-    stag.aiState = "chase";
-    const prevX = stag.x;
-    const prevY = stag.y;
-    moveEnemy(stag, target.x, target.y, world2.chunks, delta);
-    if (Math.hypot(stag.x - prevX, stag.y - prevY) < 0.5) {
-      attackBlockingBuilding(world2, stag, target, now);
-    }
-  } else {
-    stag.aiState = "attack";
-    if (now >= stag.lastMeleeTime + STAG_MELEE_COOLDOWN && now >= stag.lastAttackTime + 1e3) {
-      if (!target.shieldActive) {
-        const dmg = Math.max(1, Math.floor(target.hp / 2));
-        target.hp -= dmg;
-        if (target.hp <= 0) killPlayer(world2, target);
+      if (nearestDist < 800) {
+        angle = nearestAngle + (Math.random() - 0.5) * Math.PI;
       }
-      stag.lastMeleeTime = now;
-      stag.lastAttackTime = now;
+      const dotTowardOrigin = Math.cos(angle) * (-enemy.x / distFromOrigin) + Math.sin(angle) * (-enemy.y / distFromOrigin);
+      if (dotTowardOrigin > 0.3 && distFromEdge < 800) {
+        angle = awayFromOriginAngle + (Math.random() - 0.5) * Math.PI * 0.8;
+      }
+      enemy.wanderAngle = angle;
+    }
+    enemy.wanderNextChange = now + 2e3 + Math.random() * 3e3;
+  }
+  const targetX = enemy.x + Math.cos(enemy.wanderAngle) * 200;
+  const targetY = enemy.y + Math.sin(enemy.wanderAngle) * 200;
+  moveEnemy(enemy, targetX, targetY, world2.chunks, delta);
+}
+function attackBlockingBuilding(world2, enemy, target, now) {
+  if (now < enemy.lastBuildingAttack + BUILDING_ATTACK_COOLDOWN) return;
+  const angle = Math.atan2(target.y - enemy.y, target.x - enemy.x);
+  for (let step = 1; step <= 2; step++) {
+    const checkX = enemy.x + Math.cos(angle) * CELL_SIZE * step * 0.5;
+    const checkY = enemy.y + Math.sin(angle) * CELL_SIZE * step * 0.5;
+    const cellX = Math.floor(checkX / CELL_SIZE);
+    const cellY = Math.floor(checkY / CELL_SIZE);
+    const building = world2.chunks.getBuildingAtCell(cellX, cellY);
+    if (building && building.isSolid()) {
+      building.hp -= enemy.damage;
+      enemy.lastBuildingAttack = now;
+      if (building.hp <= 0) {
+        world2.removeBuilding(building);
+      }
+      return;
     }
   }
 }
+function findNearestPlayer(world2, enemy) {
+  if (enemy.aggroTargetId !== null) {
+    const aggroTarget = world2.players.get(enemy.aggroTargetId);
+    if (aggroTarget && !aggroTarget.dead) {
+      const dist = Math.hypot(aggroTarget.x - enemy.x, aggroTarget.y - enemy.y);
+      if (dist < enemy.aggroRange * 2) {
+        return aggroTarget;
+      }
+    }
+    enemy.aggroTargetId = null;
+  }
+  let nearest = null;
+  let nearestDist = enemy.aggroRange;
+  const nearby = world2.chunks.getNearbyEntities(enemy.x, enemy.y);
+  for (const player of nearby.players) {
+    if (player.dead) continue;
+    const dist = Math.hypot(player.x - enemy.x, player.y - enemy.y);
+    if (dist < nearestDist) {
+      nearestDist = dist;
+      nearest = player;
+    }
+  }
+  return nearest;
+}
+
+// server/src/systems/ai/LionAI.ts
 var LION_RAMP_DURATION = 3e3;
 var LION_MAX_SPEED_MULT = 1.18;
 function tickLion(world2, lion, target, dist, delta) {
@@ -1837,12 +1789,12 @@ function tickLion(world2, lion, target, dist, delta) {
           if (player.parryActive) {
             const reflectDmg = Math.ceil(lion.damage * PARRY_REFLECT_MULT);
             lion.hp -= reflectDmg;
-            world2.sendEvent(player, "kill", `Parried a lion swipe! Reflected ${reflectDmg} damage!`);
             if (lion.hp <= 0) {
               lion.markedForRemoval = true;
               world2.suppressSpawnsAt(lion.x, lion.y);
-              awardSource(player, SOURCE_LION_KILL_AMOUNT, world2);
-              world2.sendEvent(player, "kill", `You killed a lion! +${SOURCE_LION_KILL_AMOUNT} Source`);
+              const lionReward = SOURCE_LION_KILL_AMOUNT + (getDayPhase() === "dawn" ? SOURCE_TRANSITION_BONUS : 0);
+              awardSource(player, lionReward, world2);
+              world2.sendEvent(player, "kill", `You killed a lion! +${lionReward} Source`);
               world2.broadcastAll({
                 type: "event",
                 kind: "destroy",
@@ -1948,8 +1900,9 @@ function tickLion(world2, lion, target, dist, delta) {
         if (nearPlayer.parryActive) {
           lion.hp -= lion.damage * PARRY_REFLECT_MULT;
           if (lion.hp <= 0) {
-            awardSource(nearPlayer, SOURCE_LION_KILL_AMOUNT, world2);
-            world2.sendEvent(nearPlayer, "kill", `You killed a lion! +${SOURCE_LION_KILL_AMOUNT} Source`);
+            const parryLionReward = SOURCE_LION_KILL_AMOUNT + (getDayPhase() === "dawn" ? SOURCE_TRANSITION_BONUS : 0);
+            awardSource(nearPlayer, parryLionReward, world2);
+            world2.sendEvent(nearPlayer, "kill", `You killed a lion! +${parryLionReward} Source`);
             lion.markedForRemoval = true;
             world2.broadcastAll({
               type: "event",
@@ -1967,6 +1920,20 @@ function tickLion(world2, lion, target, dist, delta) {
     }
   }
 }
+function alertNearbyLions(world2, lion, target) {
+  const nearby = world2.chunks.getNearbyEntities(lion.x, lion.y);
+  for (const other of nearby.enemies) {
+    if (other === lion) continue;
+    if (!(other instanceof Lion)) continue;
+    if (other.aiState !== "idle") continue;
+    const dist = Math.hypot(other.x - lion.x, other.y - lion.y);
+    if (dist <= 300) {
+      other.aggroTargetId = target.id;
+    }
+  }
+}
+
+// server/src/systems/ai/GhostAI.ts
 function tickGhostPhase(ghost) {
   const now = Date.now();
   if (!ghost.phased && now >= ghost.nextPhaseTime) {
@@ -2060,99 +2027,156 @@ function fireGhostProjectile(world2, ghost, target) {
   proj.homingRate = GHOST_PROJECTILE_HOMING;
   world2.addProjectile(proj);
 }
-function wander(enemy, delta, world2) {
+
+// server/src/systems/ai/StagAI.ts
+function tickStag(world2, stag, target, dist, delta) {
   const now = Date.now();
-  if (now >= enemy.wanderNextChange) {
-    const distFromOrigin = Math.hypot(enemy.x, enemy.y);
-    const distFromEdge = distFromOrigin - SAFE_ZONE_RADIUS;
-    const awayFromOriginAngle = Math.atan2(enemy.y, enemy.x);
-    if (distFromEdge < 400) {
-      const urgency = 1 - Math.max(0, distFromEdge) / 400;
-      const spread = (1 - urgency) * Math.PI * 0.6;
-      enemy.wanderAngle = awayFromOriginAngle + (Math.random() - 0.5) * spread;
-    } else {
-      let angle = Math.random() * Math.PI * 2;
-      const nearby = world2.chunks.getNearbyEntities(enemy.x, enemy.y);
-      let nearestDist = Infinity;
-      let nearestAngle = angle;
+  if (stag.charging) {
+    const elapsed = now - stag.chargeStartTime;
+    if (elapsed >= STAG_CHARGE_DURATION) {
+      stag.charging = false;
+      stag.speed = STAG_SPEED;
+      const nearby = world2.chunks.getEntitiesInRadius(stag.x, stag.y, STAG_MELEE_RANGE + 20);
       for (const player of nearby.players) {
-        if (player.dead) continue;
-        const d = Math.hypot(player.x - enemy.x, player.y - enemy.y);
-        if (d < nearestDist && d < 800) {
-          nearestDist = d;
-          nearestAngle = Math.atan2(player.y - enemy.y, player.x - enemy.x);
+        if (player.dead || player.shieldActive) continue;
+        const pDist = Math.hypot(player.x - stag.x, player.y - stag.y);
+        if (pDist <= STAG_MELEE_RANGE + 20) {
+          player.hp -= STAG_CHARGE_DAMAGE;
+          if (player.hp <= 0) killPlayer(world2, player);
         }
       }
-      if (nearestDist < 800) {
-        angle = nearestAngle + (Math.random() - 0.5) * Math.PI;
-      }
-      const dotTowardOrigin = Math.cos(angle) * (-enemy.x / distFromOrigin) + Math.sin(angle) * (-enemy.y / distFromOrigin);
-      if (dotTowardOrigin > 0.3 && distFromEdge < 800) {
-        angle = awayFromOriginAngle + (Math.random() - 0.5) * Math.PI * 0.8;
-      }
-      enemy.wanderAngle = angle;
-    }
-    enemy.wanderNextChange = now + 2e3 + Math.random() * 3e3;
-  }
-  const targetX = enemy.x + Math.cos(enemy.wanderAngle) * 200;
-  const targetY = enemy.y + Math.sin(enemy.wanderAngle) * 200;
-  moveEnemy(enemy, targetX, targetY, world2.chunks, delta);
-}
-var BUILDING_ATTACK_COOLDOWN = 800;
-function attackBlockingBuilding(world2, enemy, target, now) {
-  if (now < enemy.lastBuildingAttack + BUILDING_ATTACK_COOLDOWN) return;
-  const angle = Math.atan2(target.y - enemy.y, target.x - enemy.x);
-  for (let step = 1; step <= 2; step++) {
-    const checkX = enemy.x + Math.cos(angle) * CELL_SIZE * step * 0.5;
-    const checkY = enemy.y + Math.sin(angle) * CELL_SIZE * step * 0.5;
-    const cellX = Math.floor(checkX / CELL_SIZE);
-    const cellY = Math.floor(checkY / CELL_SIZE);
-    const building = world2.chunks.getBuildingAtCell(cellX, cellY);
-    if (building && building.isSolid()) {
-      building.hp -= enemy.damage;
-      enemy.lastBuildingAttack = now;
-      if (building.hp <= 0) {
-        world2.removeBuilding(building);
-      }
+      stag.lastAttackTime = now;
       return;
     }
+    stag.speed = STAG_CHARGE_SPEED;
+    moveEnemy(stag, stag.chargeTargetX, stag.chargeTargetY, world2.chunks, delta);
+    stag.aiState = "attack";
+    return;
   }
-}
-function alertNearbyLions(world2, lion, target) {
-  const nearby = world2.chunks.getNearbyEntities(lion.x, lion.y);
-  for (const other of nearby.enemies) {
-    if (other === lion) continue;
-    if (!(other instanceof Lion)) continue;
-    if (other.aiState !== "idle") continue;
-    const dist = Math.hypot(other.x - lion.x, other.y - lion.y);
-    if (dist <= 300) {
-      other.aggroTargetId = target.id;
+  if (dist >= STAG_MELEE_RANGE && dist <= STAG_CHARGE_RANGE && now >= stag.lastChargeTime + STAG_CHARGE_COOLDOWN && now >= stag.lastAttackTime + 1e3) {
+    stag.charging = true;
+    stag.chargeStartTime = now;
+    stag.lastChargeTime = now;
+    stag.chargeTargetX = target.x;
+    stag.chargeTargetY = target.y;
+    stag.speed = STAG_CHARGE_SPEED;
+    stag.aiState = "attack";
+    return;
+  }
+  if (dist <= STAG_FIRE_BREATH_RANGE && now >= stag.lastFireBreathTime + STAG_FIRE_BREATH_COOLDOWN && now >= stag.lastAttackTime + 1e3) {
+    const dx = target.x - stag.x;
+    const dy = target.y - stag.y;
+    const baseAngle = Math.atan2(dy, dx);
+    const speed = 180;
+    for (let i = -1; i <= 1; i++) {
+      const angle = baseAngle + i * 0.15;
+      const vx = Math.cos(angle) * speed;
+      const vy = Math.sin(angle) * speed;
+      const proj = new Projectile(stag.x, stag.y, vx, vy, STAG_FIRE_BREATH_DAMAGE, stag.id, "enemy");
+      proj.visualSource = "stag";
+      proj.ttl = 1500;
+      proj.aoeRadius = STAG_FIRE_BREATH_AOE_RADIUS;
+      world2.addProjectile(proj);
+    }
+    stag.lastFireBreathTime = now;
+    stag.lastAttackTime = now;
+  }
+  if (dist > STAG_MELEE_RANGE + 10) {
+    stag.aiState = "chase";
+    const prevX = stag.x;
+    const prevY = stag.y;
+    moveEnemy(stag, target.x, target.y, world2.chunks, delta);
+    if (Math.hypot(stag.x - prevX, stag.y - prevY) < 0.5) {
+      attackBlockingBuilding(world2, stag, target, now);
+    }
+  } else {
+    stag.aiState = "attack";
+    if (now >= stag.lastMeleeTime + STAG_MELEE_COOLDOWN && now >= stag.lastAttackTime + 1e3) {
+      if (!target.shieldActive) {
+        const dmg = Math.max(1, Math.floor(target.hp / 2));
+        target.hp -= dmg;
+        if (target.hp <= 0) killPlayer(world2, target);
+      }
+      stag.lastMeleeTime = now;
+      stag.lastAttackTime = now;
     }
   }
 }
-function findNearestPlayer(world2, enemy) {
-  if (enemy.aggroTargetId !== null) {
-    const aggroTarget = world2.players.get(enemy.aggroTargetId);
-    if (aggroTarget && !aggroTarget.dead) {
-      const dist = Math.hypot(aggroTarget.x - enemy.x, aggroTarget.y - enemy.y);
-      if (dist < enemy.aggroRange * 2) {
-        return aggroTarget;
+
+// server/src/systems/AISystem.ts
+function tickAI(world2, delta, doSeparation = true) {
+  for (const [, enemy] of world2.enemies) {
+    if (enemy.markedForRemoval) continue;
+    if (Date.now() < enemy.stunUntil) continue;
+    if (Math.hypot(enemy.x, enemy.y) < SAFE_ZONE_RADIUS) {
+      enemy.markedForRemoval = true;
+      world2.broadcastAll({
+        type: "event",
+        kind: "destroy",
+        message: `__fx_explode_${Math.round(enemy.x)}_${Math.round(enemy.y)}_${enemy.kind}__`
+      });
+      continue;
+    }
+    const target = findNearestPlayer(world2, enemy);
+    if (!target) {
+      wander(enemy, delta, world2);
+      enemy.aiState = "idle";
+      if (enemy instanceof Lion) {
+        enemy.speed = LION_SPEED;
+        enemy.chaseStartTime = 0;
+        enemy.chaseLionsSpawned = 0;
+      }
+      if (enemy instanceof Ghost) {
+        tickGhostPhase(enemy);
+      }
+      continue;
+    }
+    const dist = Math.hypot(target.x - enemy.x, target.y - enemy.y);
+    enemy.facing = Math.atan2(target.y - enemy.y, target.x - enemy.x);
+    if (enemy instanceof ScorchedStag) {
+      tickStag(world2, enemy, target, dist, delta);
+    } else if (enemy instanceof Lion) {
+      tickLion(world2, enemy, target, dist, delta);
+    } else if (enemy instanceof Ghost) {
+      tickGhost(world2, enemy, target, dist, delta);
+    }
+  }
+  if (doSeparation) {
+    const SEPARATION_DIST = 20;
+    for (const [, enemy] of world2.enemies) {
+      if (enemy.markedForRemoval) continue;
+      const nearby = world2.chunks.getNearbyEntities(enemy.x, enemy.y);
+      for (const other of nearby.enemies) {
+        if (other.id <= enemy.id || other.markedForRemoval) continue;
+        const dx = other.x - enemy.x;
+        const dy = other.y - enemy.y;
+        const d = Math.hypot(dx, dy);
+        if (d < SEPARATION_DIST && d > 0.1) {
+          const push = (SEPARATION_DIST - d) * 0.5;
+          const nx = dx / d;
+          const ny = dy / d;
+          const e1x = enemy.x - nx * push;
+          const e1y = enemy.y - ny * push;
+          if (!isInsideBuilding(e1x, e1y, world2)) {
+            enemy.x = e1x;
+            enemy.y = e1y;
+          }
+          const e2x = other.x + nx * push;
+          const e2y = other.y + ny * push;
+          if (!isInsideBuilding(e2x, e2y, world2)) {
+            other.x = e2x;
+            other.y = e2y;
+          }
+        }
       }
     }
-    enemy.aggroTargetId = null;
   }
-  let nearest = null;
-  let nearestDist = enemy.aggroRange;
-  const nearby = world2.chunks.getNearbyEntities(enemy.x, enemy.y);
-  for (const player of nearby.players) {
-    if (player.dead) continue;
-    const dist = Math.hypot(player.x - enemy.x, player.y - enemy.y);
-    if (dist < nearestDist) {
-      nearestDist = dist;
-      nearest = player;
+  for (const [, enemy] of world2.enemies) {
+    if (enemy.markedForRemoval) continue;
+    if (isInsideBuilding(enemy.x, enemy.y, world2)) {
+      pushOutOfBuilding(enemy, world2);
     }
   }
-  return nearest;
 }
 
 // server/src/systems/BuildingSystem.ts
@@ -2557,6 +2581,14 @@ var World = class {
   enemies = /* @__PURE__ */ new Map();
   projectiles = /* @__PURE__ */ new Map();
   buildingsById = /* @__PURE__ */ new Map();
+  /** Convenience alias — AI rule implementations often use `world.buildings` */
+  get buildings() {
+    return this.buildingsById;
+  }
+  /** Current day phase — convenience getter wrapping getDayPhase() */
+  get dayPhase() {
+    return getDayPhase();
+  }
   /** chunkKey -> timestamp of last enemy kill in that chunk */
   spawnSuppressions = /* @__PURE__ */ new Map();
   /** Whether the world boss has been spawned this session */
@@ -2576,6 +2608,7 @@ var World = class {
   lastBuildingSave = 0;
   lastLionsAllowed = shouldSpawnLions();
   lastGhostsAllowed = shouldSpawnGhosts();
+  lastDayPhase = getDayPhase();
   tickInterval = null;
   constructor(db2) {
     this.db = db2;
@@ -2584,7 +2617,8 @@ var World = class {
       id: r.id,
       text: r.text,
       createdBy: r.created_by,
-      createdAt: r.created_at
+      createdAt: r.created_at,
+      status: r.status
     }));
     const dbBuildings = db2.getAllBuildings();
     const cellMap = /* @__PURE__ */ new Map();
@@ -2658,6 +2692,18 @@ var World = class {
     }
     this.lastLionsAllowed = lionsNow;
     this.lastGhostsAllowed = ghostsNow;
+    const currentPhase = getDayPhase();
+    if (currentPhase !== this.lastDayPhase) {
+      const labels = { day: "Day", night: "Night", dawn: "Dawn", dusk: "Dusk" };
+      let phaseMsg = `${labels[currentPhase]} has begun.`;
+      if (currentPhase === "dawn") {
+        phaseMsg += " Lions yield bonus Source!";
+      } else if (currentPhase === "dusk") {
+        phaseMsg += " Ghosts yield bonus Source!";
+      }
+      this.broadcastAll({ type: "event", kind: "phase", message: phaseMsg });
+      this.lastDayPhase = currentPhase;
+    }
     tickAI(this, delta, this.tickCount % 3 === 0);
     tickTurrets(this);
     if (now - this.lastSpawnCheck >= SPAWN_CHECK_INTERVAL) {
@@ -2818,7 +2864,7 @@ var World = class {
         }
       }
       const selfAnim = player.dead ? "dead" : player.anim;
-      const json = `{"type":"snapshot","serverTime":${serverTime},"seq":${player.inputSeq},"dayPhase":"${dayPhase}","entities":[${entityJsonParts.join(",")}],"selfHp":${player.hp},"selfMaxHp":${player.maxHp},"selfSource":${player.source},"selfPos":{"x":${player.x},"y":${player.y}},"selfDead":${player.dead},"selfRespawnAt":${player.respawnAt},"selfFacing":${player.facing},"selfAnim":"${selfAnim}","selfShieldActive":${player.shieldActive},"selfShieldCooldownUntil":${player.shieldCooldownUntil},"selfParryActive":${player.parryActive},"selfParryCooldownUntil":${player.parryCooldownUntil},"selfStatLevels":${JSON.stringify(player.statLevels)},"selfBankedSource":${player.bankedSource},"selfBuildingCount":${player.buildingCount}}`;
+      const json = `{"type":"snapshot","serverTime":${serverTime},"seq":${player.inputSeq},"dayPhase":"${dayPhase}","entities":[${entityJsonParts.join(",")}],"selfHp":${player.hp},"selfMaxHp":${player.maxHp},"selfSource":${player.source},"selfPos":{"x":${player.x},"y":${player.y}},"selfDead":${player.dead},"selfRespawnAt":${player.respawnAt},"selfFacing":${player.facing},"selfAnim":"${selfAnim}","selfShieldActive":${player.shieldActive},"selfShieldCooldownUntil":${player.shieldCooldownUntil},"selfParryActive":${player.parryActive},"selfParryCooldownUntil":${player.parryCooldownUntil},"selfPunchCooldownUntil":${player.punchCooldownUntil},"selfLungeCooldownUntil":${player.lungeCooldownUntil},"selfArrowCooldownUntil":${player.arrowCooldownUntil},"selfDashCooldownUntil":${player.dashCooldownUntil},"selfStatLevels":${JSON.stringify(player.statLevels)},"selfBankedSource":${player.bankedSource},"selfBuildingCount":${player.buildingCount}}`;
       player.sendRaw(json);
     }
   }
@@ -2827,7 +2873,7 @@ var World = class {
 // server/src/server.ts
 import http from "http";
 import fs2 from "fs";
-import path3 from "path";
+import path4 from "path";
 import { WebSocketServer } from "ws";
 
 // server/src/entities/Player.ts
@@ -2970,7 +3016,17 @@ var Player = class extends Entity {
 };
 
 // server/src/services/ClaudeService.ts
+import { readFileSync } from "fs";
+import path from "path";
 var ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
+var PROJECT_ROOT = path.resolve(import.meta.dirname, "../..");
+function loadClaudeRules() {
+  try {
+    return readFileSync(path.resolve(PROJECT_ROOT, "claude-rules.md"), "utf-8").trim();
+  } catch {
+    return "";
+  }
+}
 async function generateRule(winnerName, rawInput, existingRules) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -2978,6 +3034,7 @@ async function generateRule(winnerName, rawInput, existingRules) {
   }
   console.log(`[ClaudeService] Making API call with key starting: ${apiKey.slice(0, 10)}...`);
   const rulesContext = existingRules.length > 0 ? existingRules.map((r, i) => `${i + 1}. ${r.text}`).join("\n") : "None yet.";
+  const customRules = loadClaudeRules();
   const response = await fetch(ANTHROPIC_API_URL, {
     method: "POST",
     headers: {
@@ -2993,6 +3050,7 @@ async function generateRule(winnerName, rawInput, existingRules) {
 Each day, the player who generated the most Source gets to add a new rule or game element. You must take their raw input and shape it into a single clear, concise, fair game rule or element description.
 
 GUARDRAILS \u2014 the rule MUST NOT:
+- Be unrelated to gameplay \u2014 rules must directly affect the game world, mechanics, or player experience. Reject jokes, memes, meta-commentary, real-world references, or anything that isn't a concrete game change.
 - Remove, shrink, or compromise the safe zone or yellow (no-build) buffer zone in any way
 - Alter the Bank NPC, Scribe NPC, or their functionality in any way
 - Alter player names, login flow, or prevent players from being able to join the game
@@ -3015,8 +3073,11 @@ The rule CAN:
 
 Currently active rules:
 ${rulesContext}
-
-Respond with ONLY the rule text \u2014 one or two sentences max, no explanation or commentary.`,
+${customRules ? `
+ADDITIONAL SERVER RULES \u2014 the server admin has added these extra constraints:
+${customRules}
+` : ""}
+Respond with ONLY the rule text \u2014 one or two sentences max, plain text only (no markdown, no bold, no asterisks), no explanation or commentary.`,
       messages: [
         {
           role: "user",
@@ -3040,29 +3101,32 @@ Respond with ONLY the rule text \u2014 one or two sentences max, no explanation 
 // server/src/services/RuleImplementer.ts
 import { execSync } from "child_process";
 import fs from "fs";
-import path from "path";
-var PROJECT_ROOT = path.resolve(import.meta.dirname, "../..");
+import path2 from "path";
+var PROJECT_ROOT2 = path2.resolve(import.meta.dirname, "../..");
 var ANTHROPIC_API_URL2 = "https://api.anthropic.com/v1/messages";
-var MAX_TURNS = 50;
-var MAX_FILE_SIZE = 5e4;
+var MAX_TURNS = parseInt(process.env.CLAUDE_MAX_TURNS || "50", 10);
+var MAX_READ_RESULT = 8e3;
 var MAX_RETRIES = 5;
 var RETRY_BASE_DELAY = 15e3;
 var TURN_DELAY = 2e3;
+var READ_MODEL = "claude-haiku-4-5-20251001";
 var TOOLS = [
   {
     name: "read_file",
-    description: "Read the contents of a file. Path is relative to the project root.",
+    description: "Read the contents of a file. Path is relative to the project root. Returns the full file by default, or a specific line range if start_line/end_line are provided.",
     input_schema: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Relative file path from project root" }
+        path: { type: "string", description: "Relative file path from project root" },
+        start_line: { type: "number", description: "First line to return (1-based, inclusive). Omit to start from beginning." },
+        end_line: { type: "number", description: "Last line to return (1-based, inclusive). Omit to read to end." }
       },
       required: ["path"]
     }
   },
   {
     name: "write_file",
-    description: "Write content to a file (creates or overwrites). Path is relative to the project root.",
+    description: "Write content to a file (creates or overwrites). Path is relative to the project root. Use this for NEW files. For modifying existing files, prefer edit_file instead.",
     input_schema: {
       type: "object",
       properties: {
@@ -3073,8 +3137,21 @@ var TOOLS = [
     }
   },
   {
+    name: "edit_file",
+    description: "Make a targeted edit to an existing file by replacing a specific string. Much more efficient than write_file for modifying existing files \u2014 you only send the changed portion. You can make multiple edits per call by providing multiple old/new pairs.",
+    input_schema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Relative file path from project root" },
+        old_string: { type: "string", description: "Exact text to find and replace (must match uniquely in the file)" },
+        new_string: { type: "string", description: "Text to replace it with" }
+      },
+      required: ["path", "old_string", "new_string"]
+    }
+  },
+  {
     name: "run_command",
-    description: "Run a shell command in the project root. Use for building (npm run build) or listing files. Do NOT use for installing packages.",
+    description: "Run a shell command in the project root. ONLY use for: building (npm run build), listing directory contents (ls), or checking build output. Do NOT use for reading files (use read_file), editing files (use edit_file), or installing packages.",
     input_schema: {
       type: "object",
       properties: {
@@ -3085,6 +3162,10 @@ var TOOLS = [
   }
 ];
 var fileBackups = /* @__PURE__ */ new Map();
+var readCache = /* @__PURE__ */ new Map();
+var MAX_READ_TURNS = 6;
+var consecutiveReadTurns = 0;
+var hasWritten = false;
 function backupFile(filePath) {
   if (fileBackups.has(filePath)) return;
   if (fs.existsSync(filePath)) {
@@ -3100,41 +3181,116 @@ function executeTool(name, input) {
   try {
     switch (name) {
       case "read_file": {
+        if (!hasWritten && consecutiveReadTurns >= MAX_READ_TURNS) {
+          console.log(`[RuleImplementer] READ REFUSED (${consecutiveReadTurns} consecutive read turns)`);
+          return "ERROR: READ LIMIT REACHED. You have read enough files. You MUST use write_file now to implement the changes. Stop reading and start writing code immediately.";
+        }
         const normalizedPath = normalizePath(input.path);
-        const filePath = path.resolve(PROJECT_ROOT, normalizedPath);
-        if (!filePath.startsWith(PROJECT_ROOT)) {
+        const startLine = input.start_line ? parseInt(input.start_line, 10) : input.start ? parseInt(input.start, 10) : 0;
+        const endLine = input.end_line ? parseInt(input.end_line, 10) : input.end ? parseInt(input.end, 10) : 0;
+        const hasLineRange = startLine > 0 || endLine > 0;
+        const cacheKey = hasLineRange ? `${normalizedPath}:${startLine}-${endLine}` : normalizedPath;
+        const cached = readCache.get(cacheKey);
+        if (cached !== void 0) {
+          console.log(`[RuleImplementer] Cache hit: ${cacheKey}`);
+          return cached;
+        }
+        const filePath = path2.resolve(PROJECT_ROOT2, normalizedPath);
+        if (!filePath.startsWith(PROJECT_ROOT2)) {
           return "Error: path escapes project root";
         }
         if (!fs.existsSync(filePath)) {
           return `Error: file not found: ${normalizedPath}`;
         }
         const content = fs.readFileSync(filePath, "utf-8");
-        if (content.length > MAX_FILE_SIZE) {
-          return content.slice(0, MAX_FILE_SIZE) + "\n... (truncated)";
+        let result;
+        if (hasLineRange) {
+          const lines = content.split("\n");
+          const start = Math.max(1, startLine) - 1;
+          const end = endLine > 0 ? Math.min(endLine, lines.length) : lines.length;
+          const slice = lines.slice(start, end);
+          result = slice.map((line, i) => `${start + i + 1}: ${line}`).join("\n");
+          if (result.length > MAX_READ_RESULT) {
+            result = result.slice(0, MAX_READ_RESULT) + `
+... (truncated at ${MAX_READ_RESULT} chars)`;
+          }
+          result = `[Lines ${start + 1}-${end} of ${lines.length}]
+${result}`;
+        } else if (content.length > MAX_READ_RESULT) {
+          result = content.slice(0, MAX_READ_RESULT) + `
+... (truncated at ${MAX_READ_RESULT} chars \u2014 ${content.length} total)`;
+        } else {
+          result = content;
         }
-        return content;
+        readCache.set(cacheKey, result);
+        return result;
       }
       case "write_file": {
         const normalizedPath = normalizePath(input.path);
-        const filePath = path.resolve(PROJECT_ROOT, normalizedPath);
-        if (!filePath.startsWith(PROJECT_ROOT)) {
+        const filePath = path2.resolve(PROJECT_ROOT2, normalizedPath);
+        if (!filePath.startsWith(PROJECT_ROOT2)) {
           return "Error: path escapes project root";
         }
-        const dir = path.dirname(filePath);
+        const dir = path2.dirname(filePath);
         if (!fs.existsSync(dir)) {
           fs.mkdirSync(dir, { recursive: true });
         }
         backupFile(filePath);
         fs.writeFileSync(filePath, input.content);
+        hasWritten = true;
+        for (const key of readCache.keys()) {
+          if (key === normalizedPath || key.startsWith(normalizedPath + ":")) {
+            readCache.delete(key);
+          }
+        }
         return `Successfully wrote ${normalizedPath}`;
+      }
+      case "edit_file": {
+        const normalizedPath = normalizePath(input.path);
+        const filePath = path2.resolve(PROJECT_ROOT2, normalizedPath);
+        if (!filePath.startsWith(PROJECT_ROOT2)) {
+          return "Error: path escapes project root";
+        }
+        if (!fs.existsSync(filePath)) {
+          return `Error: file not found: ${normalizedPath}`;
+        }
+        const content = fs.readFileSync(filePath, "utf-8");
+        const oldStr = input.old_string;
+        const newStr = input.new_string;
+        if (!oldStr) {
+          return "Error: old_string is required";
+        }
+        const occurrences = content.split(oldStr).length - 1;
+        if (occurrences === 0) {
+          return `Error: old_string not found in ${normalizedPath}. Make sure the text matches exactly (including whitespace and newlines).`;
+        }
+        if (occurrences > 1) {
+          return `Error: old_string found ${occurrences} times in ${normalizedPath}. It must be unique \u2014 include more surrounding context to match exactly one location.`;
+        }
+        backupFile(filePath);
+        const updated = content.replace(oldStr, newStr);
+        fs.writeFileSync(filePath, updated);
+        hasWritten = true;
+        for (const key of readCache.keys()) {
+          if (key === normalizedPath || key.startsWith(normalizedPath + ":")) {
+            readCache.delete(key);
+          }
+        }
+        return `Successfully edited ${normalizedPath}`;
       }
       case "run_command": {
         const cmd = input.command;
         if (cmd.includes("rm -rf") || cmd.includes("npm install") || cmd.includes("npm add")) {
           return "Error: command not allowed";
         }
+        if (/^\s*(cat|head|tail|sed\s+-n|grep)\s/.test(cmd) || /^\s*sed\s.*-n\s/.test(cmd)) {
+          return "Error: use read_file to read files, not shell commands. Use edit_file to modify files, not sed.";
+        }
+        if (/^\s*sed\s+-i/.test(cmd) || /^\s*sed\s.*-i/.test(cmd)) {
+          return "Error: use edit_file to modify files, not sed -i.";
+        }
         const output = execSync(cmd, {
-          cwd: PROJECT_ROOT,
+          cwd: PROJECT_ROOT2,
           timeout: 6e4,
           maxBuffer: 1024 * 1024,
           stdio: ["pipe", "pipe", "pipe"]
@@ -3158,7 +3314,7 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 function trimMessages(messages) {
-  const KEEP_RECENT = 6;
+  const KEEP_RECENT = 10;
   return messages.map((msg, i) => {
     if (i >= messages.length - KEEP_RECENT) return msg;
     if (msg.role !== "user" || typeof msg.content === "string") return msg;
@@ -3171,11 +3327,12 @@ function trimMessages(messages) {
     return { ...msg, content: trimmed };
   });
 }
-async function callClaude(systemPrompt, messages) {
+async function callClaude(systemPrompt, messages, modelOverride) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     throw new Error("ANTHROPIC_API_KEY not set");
   }
+  const model = modelOverride || process.env.CLAUDE_RULE_MODEL || "claude-opus-4-6";
   const trimmedMessages = trimMessages(messages);
   const apiMessages = trimmedMessages.map((msg, i) => {
     if (i === trimmedMessages.length - 1 && msg.role === "user") {
@@ -3198,8 +3355,8 @@ async function callClaude(systemPrompt, messages) {
         "anthropic-beta": "prompt-caching-2024-07-31"
       },
       body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 16384,
+        model,
+        max_tokens: parseInt(process.env.CLAUDE_MAX_TOKENS || "16384", 10),
         system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
         tools: TOOLS,
         messages: apiMessages
@@ -3242,7 +3399,7 @@ function getBuildCommand() {
 }
 function ensureGitRepo() {
   try {
-    execSync("git status", { cwd: PROJECT_ROOT, stdio: "pipe" });
+    execSync("git status", { cwd: PROJECT_ROOT2, stdio: "pipe" });
   } catch {
     console.log("[RuleImplementer] Initializing git repo...");
     const gitignore = [
@@ -3257,12 +3414,12 @@ function ensureGitRepo() {
       "tmp/",
       "run/"
     ].join("\n");
-    fs.writeFileSync(path.join(PROJECT_ROOT, ".gitignore"), gitignore);
-    execSync("git init", { cwd: PROJECT_ROOT, stdio: "pipe" });
-    execSync('git config user.name "PlainScape Bot"', { cwd: PROJECT_ROOT, stdio: "pipe" });
-    execSync('git config user.email "bot@plainscape.game"', { cwd: PROJECT_ROOT, stdio: "pipe" });
-    execSync("git add -A", { cwd: PROJECT_ROOT, stdio: "pipe" });
-    execSync('git commit -m "initial"', { cwd: PROJECT_ROOT, stdio: "pipe" });
+    fs.writeFileSync(path2.join(PROJECT_ROOT2, ".gitignore"), gitignore);
+    execSync("git init", { cwd: PROJECT_ROOT2, stdio: "pipe" });
+    execSync('git config user.name "PlainScape Bot"', { cwd: PROJECT_ROOT2, stdio: "pipe" });
+    execSync('git config user.email "bot@plainscape.game"', { cwd: PROJECT_ROOT2, stdio: "pipe" });
+    execSync("git add -A", { cwd: PROJECT_ROOT2, stdio: "pipe" });
+    execSync('git commit -m "initial"', { cwd: PROJECT_ROOT2, stdio: "pipe" });
     console.log("[RuleImplementer] Git repo initialized");
   }
 }
@@ -3275,32 +3432,32 @@ function commitAndPush(ruleText) {
   }
   try {
     const modifiedFiles = [...fileBackups.keys()].map(
-      (f) => path.relative(PROJECT_ROOT, f)
+      (f) => path2.relative(PROJECT_ROOT2, f)
     );
     for (const [filePath, original] of fileBackups) {
       if (original === null) {
-        modifiedFiles.push(path.relative(PROJECT_ROOT, filePath));
+        modifiedFiles.push(path2.relative(PROJECT_ROOT2, filePath));
       }
     }
     if (modifiedFiles.length === 0) {
       return { success: false, error: "No files to commit" };
     }
     for (const file of modifiedFiles) {
-      execSync(`git add "${file}"`, { cwd: PROJECT_ROOT, stdio: "pipe" });
+      execSync(`git add "${file}"`, { cwd: PROJECT_ROOT2, stdio: "pipe" });
     }
     const commitMsg = `rule: ${ruleText.slice(0, 200)}`;
-    const commitMsgFile = path.join(PROJECT_ROOT, ".commit-msg-tmp");
+    const commitMsgFile = path2.join(PROJECT_ROOT2, ".commit-msg-tmp");
     fs.writeFileSync(commitMsgFile, commitMsg);
-    execSync(`git commit -F "${commitMsgFile}"`, { cwd: PROJECT_ROOT, stdio: "pipe" });
+    execSync(`git commit -F "${commitMsgFile}"`, { cwd: PROJECT_ROOT2, stdio: "pipe" });
     fs.unlinkSync(commitMsgFile);
     const remoteUrl = `https://x-access-token:${token}@github.com/${repo}.git`;
     try {
-      execSync(`git remote set-url origin ${remoteUrl}`, { cwd: PROJECT_ROOT, stdio: "pipe" });
+      execSync(`git remote set-url origin ${remoteUrl}`, { cwd: PROJECT_ROOT2, stdio: "pipe" });
     } catch {
-      execSync(`git remote add origin ${remoteUrl}`, { cwd: PROJECT_ROOT, stdio: "pipe" });
+      execSync(`git remote add origin ${remoteUrl}`, { cwd: PROJECT_ROOT2, stdio: "pipe" });
     }
     const targetBranch = process.env.GIT_PUSH_BRANCH || "live";
-    execSync(`git push origin HEAD:${targetBranch} --force`, { cwd: PROJECT_ROOT, stdio: "pipe" });
+    execSync(`git push origin HEAD:${targetBranch} --force`, { cwd: PROJECT_ROOT2, stdio: "pipe" });
     console.log(`[RuleImplementer] Pushed to ${targetBranch} branch`);
     return { success: true };
   } catch (err) {
@@ -3309,7 +3466,8 @@ function commitAndPush(ruleText) {
   }
 }
 async function implementRule(ruleText) {
-  console.log(`[RuleImplementer] Implementing rule via API: "${ruleText}"`);
+  const model = process.env.CLAUDE_RULE_MODEL || "claude-opus-4-6";
+  console.log(`[RuleImplementer] Implementing rule via ${model}: "${ruleText}"`);
   if (!process.env.ANTHROPIC_API_KEY) {
     return { success: false, error: "ANTHROPIC_API_KEY not set" };
   }
@@ -3322,39 +3480,81 @@ async function implementRule(ruleText) {
     return { success: false, error: `Git init failed: ${err instanceof Error ? err.message : err}` };
   }
   fileBackups.clear();
-  const systemPrompt = `You are modifying the PlainScape game codebase \u2014 a TypeScript monorepo with:
-- packages/shared/src/ \u2014 constants, types, protocol (shared between server & client)
-- server/src/ \u2014 Node.js game server (systems/, entities/, world/, services/)
-- client/src/ \u2014 Browser client (Canvas 2D, no framework)
+  readCache.clear();
+  consecutiveReadTurns = 0;
+  hasWritten = false;
+  let ruleGuide = "";
+  try {
+    const guidePath = path2.resolve(PROJECT_ROOT2, "RULE_GUIDE.md");
+    if (fs.existsSync(guidePath)) {
+      ruleGuide = fs.readFileSync(guidePath, "utf-8");
+    }
+  } catch {
+  }
+  const systemPrompt = `You are modifying the PlainScape game codebase to implement a player-submitted rule.
 
-A new game rule has been added by a player: "${ruleText}"
+RULE TO IMPLEMENT: "${ruleText}"
 
-Implement this rule with MINIMAL changes and MINIMAL file reads. You are rate-limited so efficiency is critical:
-- Read at most 2-3 files before making changes
-- Make ALL your writes in as few turns as possible
-- Use parallel tool calls (multiple tool_use blocks in one response) whenever possible
-- Do NOT re-read files you've already seen
+## TURN BUDGET: ${MAX_TURNS} turns maximum
 
-IMPORTANT: All file paths are RELATIVE to the project root. Use paths like "packages/shared/src/constants.ts", NOT "/app/packages/..." or "app/packages/...".
+You have a HARD LIMIT of ${MAX_TURNS} API turns to complete this rule. Each time you respond (whether with tool calls or text) uses one turn. Plan accordingly:
+- Turns 1-3: Read files and plan
+- Turns 4-${MAX_TURNS - 5}: Implement (batch writes together \u2014 write multiple files in a single turn)
+- Last 5 turns: Reserved for build, fix errors, and say DONE
 
-The build command is: ${getBuildCommand()}
-Do NOT use "npm run build" \u2014 use the esbuild command above instead.
+If you're running low on turns, prioritize getting a working build over perfect code.
 
-Key files to consider:
-- packages/shared/src/constants.ts \u2014 all game parameters
-- packages/shared/src/protocol.ts \u2014 client\u2194server messages
-- packages/shared/src/types.ts \u2014 shared types
-- server/src/world/World.ts \u2014 game loop
-- server/src/systems/CombatSystem.ts \u2014 combat logic
-- server/src/systems/AISystem.ts \u2014 enemy AI
-- server/src/systems/SpawnSystem.ts \u2014 enemy spawning
-- server/src/systems/BuildingSystem.ts \u2014 building logic
-- server/src/systems/CurrencySystem.ts \u2014 source earning
-- client/src/main.ts \u2014 client entry point
-- client/src/rendering/Renderer.ts \u2014 rendering pipeline
-- client/index.html \u2014 HTML/CSS for UI
+## APPROACH \u2014 Plan First, Then Implement
 
-CONSTRAINTS \u2014 you MUST NOT:
+1. PLAN: Before writing any code, read the RULE_GUIDE.md (provided below) and 1-2 key files. Then write out a brief plan (which files to create/modify, what each change does). Keep the plan concise \u2014 5-10 lines max.
+2. IMPLEMENT: Execute your plan. Use write_file for NEW files, edit_file for modifying existing files. Batch multiple tool calls into a single turn whenever possible.
+3. BUILD: Run the build command to verify compilation. Fix any errors.
+4. VERIFY: Check that your changes are correct and complete.
+
+## PROJECT STRUCTURE & API REFERENCE
+
+${ruleGuide || "Read RULE_GUIDE.md at the project root for the full API reference, templates, and patterns."}
+
+## CRITICAL RULES \u2014 Read These Carefully
+
+### Timing
+- \`delta\` = seconds (float). \`Date.now()\` = milliseconds.
+- Movement: \`speed * delta\` = units moved per tick.
+- Cooldowns/intervals: compare \`Date.now()\` against stored ms timestamps.
+- GOOD: \`if (now - lastCheck > INTERVAL) { lastCheck = now; ... }\`
+- BAD: \`timer += dt; if (timer > INTERVAL) { ... }\` (accumulation drifts)
+
+### Do NOT Change Existing Function Signatures
+Adding parameters to \`moveEnemy\`, \`tickMovement\`, \`tickCombat\`, etc. requires updating EVERY call site and WILL break the build. Instead:
+- Access \`world\` directly in your new system.
+- Create NEW helper functions rather than modifying existing ones.
+
+### Use Correct Property Names
+- \`world.players\` \u2014 Map<number, Player>
+- \`world.enemies\` \u2014 Map<number, Enemy>
+- \`world.buildings\` or \`world.buildingsById\` \u2014 Map<number, Building> (both work)
+- \`world.dayPhase\` \u2014 returns 'day' | 'night' | 'dawn' | 'dusk'
+- \`player.dead\` \u2014 boolean (NOT \`player.isDead\`)
+- \`enemy.markedForRemoval\` \u2014 boolean (NOT \`enemy.dead\`)
+
+### Preferred Pattern: New System File
+For most rules, create a new file \`server/src/systems/YourRuleSystem.ts\`, then wire it into World.ts tick() before the broadcast step. Use the templates in RULE_GUIDE.md.
+
+### Import from RuleHelpers
+Use \`import { killPlayer, awardSource, moveEnemy, ... } from './RuleHelpers.js'\` for common functions and constants.
+
+## BUILD COMMAND
+
+${getBuildCommand()}
+
+Do NOT use "npm run build" \u2014 use the esbuild command above.
+
+## FILE PATHS
+
+All paths are RELATIVE to the project root. Use "packages/shared/src/constants.ts", NOT "/app/packages/..." or "app/packages/...".
+
+## CONSTRAINTS \u2014 You MUST NOT:
+- Implement anything unrelated to gameplay \u2014 if the rule doesn't describe a concrete game mechanic, effect, or change to the game world, respond with DONE immediately and make no changes
 - Remove, shrink, or compromise the safe zone or no-build buffer zone
 - Alter the Bank NPC, Scribe NPC, or their functionality
 - Alter player names, login flow, or prevent players from joining
@@ -3366,16 +3566,113 @@ CONSTRAINTS \u2014 you MUST NOT:
 - Make the game unplayable or crash-prone
 - Add npm dependencies
 - Modify files outside the project
+- Change existing function signatures (add new functions instead)
+
+## KEY INSERTION POINTS (so you don't need to read these files)
+
+### World.ts \u2014 Adding a new system to the game loop
+\`\`\`typescript
+// 1. Add import at top of server/src/world/World.ts (after existing system imports around line 8-17):
+import { tickMySystem } from '../systems/MySystem.js';
+
+// 2. Add call in tick() BEFORE line "this.broadcast();" (around line 220):
+// 12.9 My rule system
+tickMySystem(this, delta);
+\`\`\`
+
+### MovementSystem.ts \u2014 Modifying player speed
+\`\`\`typescript
+// Line ~39 in server/src/systems/MovementSystem.ts:
+let speed = (PLAYER_SPEED + player.statLevels.moveSpeed * STAT_INCREMENTS.moveSpeed) * delta;
+// Add your modifier AFTER that line:
+// if (someCondition) speed *= 0.6; // 40% slowdown
+\`\`\`
+
+### MovementSystem.ts \u2014 Modifying enemy speed
+\`\`\`typescript
+// The moveEnemy function uses enemy.speed directly.
+// To slow an enemy, modify enemy.speed before movement or multiply in your system.
+\`\`\`
+
+### World.ts \u2014 Adding entities to broadcast
+\`\`\`typescript
+// In broadcast() method (~line 341), entities are added to entityJsonParts.
+// Add your custom entities using: entityJsonParts.push(getSnapJson(myEntity));
+\`\`\`
+
+### World.ts \u2014 Adding a tarPits/custom entity map
+\`\`\`typescript
+// Add as a class field (~line 35, after buildingsById):
+readonly tarPits = new Map<number, TarPit>();
+
+// Add import at top alongside other entity imports:
+import { TarPit } from '../entities/TarPit.js';
+\`\`\`
+
+### HudRenderer.ts \u2014 Adding entities to the minimap (REQUIRED for visible entities)
+\`\`\`typescript
+// In client/src/ui/HudRenderer.ts, the drawMinimap function has an if/else chain
+// for entity.kind (~line 133). Add your new kind BEFORE the lion/ghost branch:
+//
+//   } else if (entity.kind === 'your_kind') {
+//     ctx.fillStyle = 'rgba(R, G, B, 0.5)';  // pick a distinct color
+//     ctx.beginPath();
+//     ctx.arc(mx, my, 3, 0, Math.PI * 2);  // or use fillRect for squares
+//     ctx.fill();
+//   } else if (entity.kind === 'lion' || entity.kind === 'ghost') {
+//
+// The variables mx, my are already computed (minimap coordinates).
+// Use edit_file to insert your branch.
+\`\`\`
+
+### Renderer.ts \u2014 Adding entity rendering (REQUIRED for visible entities)
+\`\`\`typescript
+// In client/src/rendering/Renderer.ts, the render() method draws entities.
+// Add your custom entity drawing in the render method (~line 60-100):
+//
+//   for (const [, entity] of state.entities) {
+//     if (entity.kind === 'your_kind') {
+//       // Draw using ctx (Canvas 2D API)
+//       // entity.x, entity.y are world coordinates
+//       // Use ctx.save/restore and translate by camera offset
+//     }
+//   }
+//
+// Or create a separate renderer file and import it.
+\`\`\`
+
+## EFFICIENCY \u2014 CRITICAL
+- You already have the insertion points above \u2014 do NOT read World.ts or MovementSystem.ts unless you need details not shown here
+- Read at most 2-3 files before starting implementation
+- Do NOT re-read files you've already seen \u2014 you will be cut off after 6 read-only turns
+- Use edit_file for surgical changes to existing files (much cheaper than write_file for large files)
+- Use write_file only for creating NEW files
+- Do NOT use run_command with cat, grep, sed, head, or tail \u2014 use read_file and edit_file instead
+- Batch multiple tool calls (read_file, write_file, edit_file) into a SINGLE turn whenever possible
+- Each turn costs an API call \u2014 minimize total turns by batching
 
 When done, say "DONE" in your final message.`;
   const messages = [
-    { role: "user", content: `Please implement this rule: "${ruleText}". Read the relevant files first, make changes, then build to verify.` }
+    { role: "user", content: `Implement this player rule: "${ruleText}"
+
+Start by reading RULE_GUIDE.md (if you haven't already from the system prompt) for templates and API reference. Then:
+1. Write a brief plan (5-10 lines) of what you'll change
+2. Implement the changes
+3. Build and fix any errors
+4. Say DONE when complete` }
   ];
   try {
+    let lastTurnReadOnly = false;
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       if (turn > 0) await sleep(TURN_DELAY);
-      console.log(`[RuleImplementer] Turn ${turn + 1}/${MAX_TURNS}`);
-      const result = await callClaude(systemPrompt, messages);
+      const useReadModel = lastTurnReadOnly && turn > 0 && turn <= 4;
+      const turnModel = useReadModel ? READ_MODEL : void 0;
+      if (useReadModel) {
+        console.log(`[RuleImplementer] Turn ${turn + 1}/${MAX_TURNS} (via ${READ_MODEL})`);
+      } else {
+        console.log(`[RuleImplementer] Turn ${turn + 1}/${MAX_TURNS}`);
+      }
+      const result = await callClaude(systemPrompt, messages, turnModel);
       for (const block of result.content) {
         if (block.type === "text") {
           console.log(`[RuleImplementer:claude] ${block.text.slice(0, 200)}`);
@@ -3404,10 +3701,48 @@ When done, say "DONE" in your final message.`;
           content: toolOutput
         });
       }
-      messages.push({ role: "user", content: toolResults });
+      const turnsRemaining = MAX_TURNS - turn - 1;
+      const isReadOnly = toolCalls.every((c) => c.name === "read_file");
+      if (isReadOnly && turn >= 4) {
+        messages.push({ role: "user", content: toolResults });
+        messages.push({ role: "assistant", content: [{ type: "text", text: "(Understood \u2014 moving to implementation now)" }] });
+        messages.push({ role: "user", content: `\u26A0\uFE0F You've spent ${turn + 1} turns reading files. STOP reading and START writing code NOW. You have enough context. Begin implementing immediately with write_file calls.` });
+      } else if (turnsRemaining <= 8 && turnsRemaining > 0) {
+        const warning = turnsRemaining <= 3 ? `\u26A0\uFE0F CRITICAL: Only ${turnsRemaining} turns left! Build NOW and say DONE.` : `\u26A0\uFE0F ${turnsRemaining} turns remaining. Wrap up implementation and build soon.`;
+        messages.push({ role: "user", content: toolResults });
+        messages.push({ role: "assistant", content: [{ type: "text", text: `(Noted: ${turnsRemaining} turns remaining)` }] });
+        messages.push({ role: "user", content: warning });
+      } else {
+        messages.push({ role: "user", content: toolResults });
+      }
+      lastTurnReadOnly = toolCalls.every((c) => c.name === "read_file");
+      if (lastTurnReadOnly) {
+        consecutiveReadTurns++;
+      } else {
+        consecutiveReadTurns = 0;
+      }
     }
     if (fileBackups.size === 0) {
       return { success: false, error: "No code changes were made" };
+    }
+    const validationErrors = [];
+    for (const [filePath] of fileBackups) {
+      if (!fs.existsSync(filePath)) continue;
+      const content = fs.readFileSync(filePath, "utf-8");
+      const relPath = path2.relative(PROJECT_ROOT2, filePath);
+      if (content.includes("player.isDead") && !content.includes("// isDead")) {
+        validationErrors.push(`${relPath}: uses "player.isDead" \u2014 should be "player.dead"`);
+      }
+      if (content.includes("enemy.dead") && !content.includes("enemy.dead =")) {
+        validationErrors.push(`${relPath}: uses "enemy.dead" \u2014 should be "enemy.markedForRemoval"`);
+      }
+      if (content.includes("'/app/") || content.includes('"/app/')) {
+        validationErrors.push(`${relPath}: contains "/app/" import path \u2014 use relative paths`);
+      }
+    }
+    if (validationErrors.length > 0) {
+      console.warn(`[RuleImplementer] Validation warnings:
+${validationErrors.join("\n")}`);
     }
     console.log("[RuleImplementer] Final build verification...");
     const buildResult = executeTool("run_command", { command: getBuildCommand() });
@@ -3644,11 +3979,14 @@ var DailyWinnerScheduler = class {
     this.world.broadcastAll({ type: "notification", text: `AI is implementing rule: "${ruleText}"...` });
     this.world.isImplementingRule = true;
     this.world.broadcastAll({ type: "rule_status", implementing: true });
+    const addedRule = this.world.rules[this.world.rules.length - 1];
     try {
       const result = await implementRule(ruleText);
       this.world.isImplementingRule = false;
       this.world.broadcastAll({ type: "rule_status", implementing: false });
       if (result.success) {
+        addedRule.status = "success";
+        this.world.db.updateRuleStatus(addedRule.id, "success");
         console.log(`[DailyWinner] Rule implemented successfully, scheduling restart`);
         this.world.broadcastAll({
           type: "notification",
@@ -3656,6 +3994,8 @@ var DailyWinnerScheduler = class {
         });
         scheduleRestart();
       } else {
+        addedRule.status = "failed";
+        this.world.db.updateRuleStatus(addedRule.id, "failed");
         console.error(`[DailyWinner] Rule implementation failed: ${result.error}`);
         this.world.broadcastAll({
           type: "notification",
@@ -3663,6 +4003,8 @@ var DailyWinnerScheduler = class {
         });
       }
     } catch (err) {
+      addedRule.status = "failed";
+      this.world.db.updateRuleStatus(addedRule.id, "failed");
       console.error("[DailyWinner] Rule implementation error:", err);
       this.world.isImplementingRule = false;
       this.world.broadcastAll({ type: "rule_status", implementing: false });
@@ -3674,7 +4016,8 @@ var DailyWinnerScheduler = class {
       id: dbRule.id,
       text: dbRule.text,
       createdBy: dbRule.created_by,
-      createdAt: dbRule.created_at
+      createdAt: dbRule.created_at,
+      status: dbRule.status
     };
     this.world.rules.push(rule);
     this.world.broadcastAll({
@@ -3770,20 +4113,79 @@ function broadcastLeaderboard(world2) {
 }
 
 // server/src/registry/ServerRegistry.ts
+import { WebSocket } from "ws";
 var ServerRegistry = class {
   servers = /* @__PURE__ */ new Map();
+  constructor() {
+    setInterval(() => this.pingAll(), 3e4);
+  }
+  /** Generate a 6-char alphanumeric code */
+  generateCode() {
+    const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+    let code = "";
+    for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    return code;
+  }
+  /** Get or create a unique shortcode for a server */
+  getOrCreateCode(key) {
+    const existing = this.servers.get(key);
+    if (existing) return existing.code;
+    const usedCodes = /* @__PURE__ */ new Set();
+    for (const s of this.servers.values()) usedCodes.add(s.code);
+    let code;
+    do {
+      code = this.generateCode();
+    } while (usedCodes.has(code));
+    return code;
+  }
   upsert(data) {
     const key = `${data.host}:${data.port}`;
+    const existing = this.servers.get(key);
+    const code = existing?.code || this.getOrCreateCode(key);
     this.servers.set(key, {
       ...data,
-      lastHeartbeat: Date.now()
+      lastHeartbeat: Date.now(),
+      code,
+      ping: existing?.ping ?? -1
     });
+    return code;
   }
   prune() {
     const now = Date.now();
     for (const [key, server] of this.servers) {
       if (now - server.lastHeartbeat > HEARTBEAT_TIMEOUT) {
         this.servers.delete(key);
+      }
+    }
+  }
+  /** Measure WebSocket handshake latency to a server */
+  pingServer(host, port) {
+    return new Promise((resolve) => {
+      const start = performance.now();
+      const ws = new WebSocket(`ws://${host}:${port}`);
+      const timer = setTimeout(() => {
+        ws.terminate();
+        resolve(-1);
+      }, 3e3);
+      ws.on("open", () => {
+        clearTimeout(timer);
+        const ms = Math.round(performance.now() - start);
+        ws.close();
+        resolve(ms);
+      });
+      ws.on("error", () => {
+        clearTimeout(timer);
+        ws.terminate();
+        resolve(-1);
+      });
+    });
+  }
+  /** Ping all registered servers */
+  async pingAll() {
+    for (const [key, server] of this.servers) {
+      const ms = await this.pingServer(server.host, server.port);
+      if (this.servers.has(key)) {
+        server.ping = ms;
       }
     }
   }
@@ -3796,7 +4198,9 @@ var ServerRegistry = class {
       playerCount: s.playerCount,
       maxPlayers: s.maxPlayers,
       description: s.description,
-      hasPassword: s.hasPassword
+      hasPassword: s.hasPassword,
+      isModded: s.isModded,
+      ...s.ping >= 0 ? { ping: s.ping } : {}
     }));
   }
 };
@@ -3825,9 +4229,9 @@ async function validatePatreonKey(key) {
 
 // server/src/registry/CommunityBranches.ts
 import { execSync as execSync2 } from "child_process";
-import path2 from "path";
-var PROJECT_ROOT2 = path2.resolve(import.meta.dirname, "../..");
-function ensureCommunityBranches(serverName) {
+import path3 from "path";
+var PROJECT_ROOT3 = path3.resolve(import.meta.dirname, "../..");
+function ensureCommunityBranches(code) {
   const token = process.env.COMMUNITY_GITHUB_KEY;
   const repo = process.env.GITHUB_REPO;
   if (!token) {
@@ -3838,60 +4242,70 @@ function ensureCommunityBranches(serverName) {
     console.warn("[CommunityBranches] No GITHUB_REPO \u2014 cannot create branches");
     return false;
   }
-  const safeName = serverName.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").slice(0, 40);
-  const liveBranch = `community/${safeName}/live`;
-  const stableBranch = `community/${safeName}/stable`;
+  if (!/^[a-z0-9]{6}$/.test(code)) {
+    console.error("[CommunityBranches] Invalid shortcode format");
+    return false;
+  }
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) {
     console.error("[CommunityBranches] Invalid GITHUB_REPO format");
     return false;
   }
+  const liveBranch = `community/${code}/live`;
+  const stableBranch = `community/${code}/stable`;
   const remoteUrl = `https://x-access-token:${token}@github.com/${repo}.git`;
   try {
     const existingRefs = execSync2(`git ls-remote --heads ${remoteUrl} ${liveBranch} ${stableBranch}`, {
-      cwd: PROJECT_ROOT2,
+      cwd: PROJECT_ROOT3,
       stdio: "pipe",
       timeout: 1e4
     }).toString();
     if (existingRefs.includes(liveBranch)) {
-      console.log(`[CommunityBranches] Branches already exist for "${safeName}"`);
+      console.log(`[CommunityBranches] Branches already exist for code "${code}"`);
       return true;
     }
-    execSync2(`git fetch ${remoteUrl} stable`, { cwd: PROJECT_ROOT2, stdio: "pipe", timeout: 15e3 });
+    execSync2(`git fetch ${remoteUrl} stable`, { cwd: PROJECT_ROOT3, stdio: "pipe", timeout: 15e3 });
     execSync2(`git push ${remoteUrl} FETCH_HEAD:refs/heads/${liveBranch}`, {
-      cwd: PROJECT_ROOT2,
+      cwd: PROJECT_ROOT3,
       stdio: "pipe",
       timeout: 15e3
     });
     execSync2(`git push ${remoteUrl} FETCH_HEAD:refs/heads/${stableBranch}`, {
-      cwd: PROJECT_ROOT2,
+      cwd: PROJECT_ROOT3,
       stdio: "pipe",
       timeout: 15e3
     });
-    console.log(`[CommunityBranches] Created branches for "${safeName}": ${liveBranch}, ${stableBranch}`);
+    console.log(`[CommunityBranches] Created branches for code "${code}": ${liveBranch}, ${stableBranch}`);
     return true;
   } catch (err) {
-    console.error(`[CommunityBranches] Failed to create branches for "${safeName}":`, err);
+    console.error(`[CommunityBranches] Failed to create branches for code "${code}":`, err);
     return false;
   }
 }
-function getCommunityBranchName(serverName) {
-  const safeName = serverName.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").slice(0, 40);
-  return `community/${safeName}/live`;
+function getCommunityLiveBranch(code) {
+  return `community/${code}/live`;
 }
 
 // server/src/server.ts
 var PORT = parseInt(process.env.PORT || "4800", 10);
 var IS_MAIN_SERVER = process.env.IS_MAIN_SERVER === "true" && !!process.env.REGISTRY_SECRET;
-var adminUsers = new Set(
-  (process.env.ADMIN_USERS || "").split(",").map((s) => s.trim()).filter(Boolean)
-);
-if (IS_MAIN_SERVER) adminUsers.add("JamesWest");
+var adminUsers = null;
+function resetAdminCache() {
+  adminUsers = null;
+}
 function isAdmin(username) {
+  if (!adminUsers) {
+    const raw = (process.env.ADMIN_USERS || "").replace(/^["']|["']$/g, "");
+    adminUsers = new Set(
+      raw.split(",").map((s) => s.trim()).filter(Boolean)
+    );
+    if (IS_MAIN_SERVER) adminUsers.add("JamesWest");
+    console.log(`[Server] ADMIN_USERS raw: "${process.env.ADMIN_USERS}" \u2192 parsed: [${[...adminUsers].join(", ")}]`);
+  }
   return adminUsers.has(username);
 }
 function loadPatchNotes() {
   try {
-    const filePath = path3.resolve(import.meta.dirname, "../../patch-notes.json");
+    const filePath = path4.resolve(import.meta.dirname, "../../patch-notes.json");
     const data = fs2.readFileSync(filePath, "utf-8");
     const notes = JSON.parse(data);
     return notes.slice(0, 3);
@@ -3911,7 +4325,8 @@ function getSignData(world2) {
 }
 function broadcastOnlineList(world2) {
   const usernames = Array.from(world2.playersByUsername.keys()).sort();
-  world2.broadcastAll({ type: "online_list", usernames });
+  const admins = usernames.filter((u) => isAdmin(u));
+  world2.broadcastAll({ type: "online_list", usernames, admins });
 }
 var MIME = {
   ".html": "text/html",
@@ -3925,7 +4340,7 @@ var registry = new ServerRegistry();
 function startServer(world2) {
   const dailyWinner = new DailyWinnerScheduler(world2);
   setInterval(() => broadcastLeaderboard(world2), 1e4);
-  const clientDir = path3.resolve(import.meta.dirname, "../../client");
+  const clientDir = path4.resolve(import.meta.dirname, "../../client");
   const httpServer = http.createServer(async (req, res) => {
     const urlPath = req.url?.split("?")[0] || "/";
     if (IS_MAIN_SERVER) {
@@ -3948,9 +4363,10 @@ function startServer(world2) {
           playerCount: world2.players.size,
           maxPlayers: DEFAULT_MAX_PLAYERS,
           description: "The official PlainScape server",
-          hasPassword: false
+          hasPassword: false,
+          isModded: false
         });
-        res.writeHead(200, { "Content-Type": "application/json" });
+        res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
         res.end(JSON.stringify(list));
         return;
       }
@@ -3976,21 +4392,22 @@ function startServer(world2) {
               return;
             }
             const serverName = String(data.name).slice(0, 50);
-            registry.upsert({
+            const code = registry.upsert({
               name: serverName,
               host: String(data.host),
               port: Number(data.port),
               playerCount: Number(data.playerCount) || 0,
               maxPlayers: Number(data.maxPlayers) || DEFAULT_MAX_PLAYERS,
               description: String(data.description || "").slice(0, 200),
-              hasPassword: Boolean(data.hasPassword)
+              hasPassword: Boolean(data.hasPassword),
+              isModded: Boolean(data.isModded)
             });
             if (hasPatreonAccess) {
-              ensureCommunityBranches(serverName);
+              ensureCommunityBranches(code);
             }
-            const branchName = getCommunityBranchName(serverName);
+            const branchName = getCommunityLiveBranch(code);
             res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ ok: true, branch: branchName }));
+            res.end(JSON.stringify({ ok: true, branch: branchName, code }));
           } catch {
             res.writeHead(400, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: "Invalid JSON" }));
@@ -4002,12 +4419,12 @@ function startServer(world2) {
     const staticPath = urlPath === "/" ? "/index.html" : urlPath;
     let filePath;
     if (staticPath.endsWith(".js") || staticPath.endsWith(".js.map")) {
-      filePath = path3.join(clientDir, "dist", path3.basename(staticPath));
+      filePath = path4.join(clientDir, "dist", path4.basename(staticPath));
     } else {
-      filePath = path3.join(clientDir, staticPath);
+      filePath = path4.join(clientDir, staticPath);
     }
-    const resolved = path3.resolve(filePath);
-    if (!resolved.startsWith(path3.resolve(clientDir))) {
+    const resolved = path4.resolve(filePath);
+    if (!resolved.startsWith(path4.resolve(clientDir))) {
       res.writeHead(403);
       res.end("Forbidden");
       return;
@@ -4018,7 +4435,7 @@ function startServer(world2) {
         res.end("Not found");
         return;
       }
-      const ext = path3.extname(resolved);
+      const ext = path4.extname(resolved);
       let content = data;
       if (ext === ".html") {
         let html = data.toString();
@@ -4028,6 +4445,7 @@ function startServer(world2) {
         const srvDesc = (process.env.SERVER_DESCRIPTION || "Survive the plains.").replace(/'/g, "\\'");
         injections.push(`window.__SERVER_NAME__='${srvName}';`);
         injections.push(`window.__SERVER_DESC__='${srvDesc}';`);
+        if (process.env.SERVER_PASSWORD) injections.push("window.__SERVER_HAS_PASSWORD__=true;");
         if (injections.length > 0) {
           html = html.replace("</head>", `<script>${injections.join("")}</script></head>`);
         }
@@ -4059,6 +4477,13 @@ function startServer(world2) {
           const token = typeof msg.token === "string" ? msg.token.trim() : "";
           if (!token) {
             ws.send(JSON.stringify({ type: "error", message: "Invalid token" }));
+            return;
+          }
+          const clientFingerprint = typeof msg.fingerprint === "string" ? msg.fingerprint : "";
+          const clientIp = req.socket.remoteAddress || "";
+          if (world2.db.isBanned(clientFingerprint, clientIp)) {
+            ws.send(JSON.stringify({ type: "error", message: "You have been banned from this server" }));
+            ws.close();
             return;
           }
           const username = msg.username.trim().slice(0, USERNAME_MAX_LENGTH);
@@ -4112,6 +4537,8 @@ function startServer(world2) {
             player.bedY = bedFoundY;
           }
           world2.addPlayer(player);
+          if (clientFingerprint) world2.db.setFingerprint(token, clientFingerprint);
+          if (clientIp) world2.db.setLastIp(token, clientIp);
           const serverName = process.env.SERVER_NAME || (IS_MAIN_SERVER ? "PlainScape" : "PlainScape Server");
           const serverDesc = process.env.SERVER_DESCRIPTION || (IS_MAIN_SERVER ? "Survive the plains." : "");
           const welcome = {
@@ -4364,6 +4791,25 @@ function startServer(world2) {
             }
             break;
           }
+          if (chatText.startsWith("/freeuser ") && isAdmin(player.username)) {
+            const targetName = chatText.slice("/freeuser ".length).trim();
+            if (!targetName) {
+              player.send({ type: "event", kind: "source", message: "Usage: /freeuser <username>" });
+              break;
+            }
+            for (const [, p] of world2.players) {
+              if (p.username === targetName) {
+                p.send({ type: "event", kind: "source", message: "Your username has been freed by an admin. Please rejoin." });
+                p.ws?.close();
+                break;
+              }
+            }
+            const freed = world2.db.freeUsername(targetName);
+            const msg2 = freed ? `Username "${targetName}" has been freed.` : `Username "${targetName}" not found in database.`;
+            player.send({ type: "event", kind: "source", message: msg2 });
+            console.log(`[Admin] ${player.username} freed username "${targetName}" \u2014 ${freed ? "success" : "not found"}`);
+            break;
+          }
           if (chatText === "/shutdown" && isAdmin(player.username)) {
             world2.broadcastAll({ type: "event", kind: "source", message: "Server is shutting down..." });
             setTimeout(() => {
@@ -4387,6 +4833,48 @@ function startServer(world2) {
               winnerName: player.username,
               topSuggestion
             });
+            break;
+          }
+          if (chatText === "/commands" && isAdmin(player.username)) {
+            const cmds = [
+              "/source <amount> \u2014 Add source to yourself",
+              "/grantrule <username> \u2014 Grant rule prompt to a player",
+              "/clearrules \u2014 Clear all active rules",
+              "/clearsuggestions \u2014 Clear all suggestions",
+              "/notice <text> \u2014 Add an admin notice",
+              "/clearnotices \u2014 Remove all notices",
+              "/dawn /day /dusk /night \u2014 Force time phase",
+              "/autotime \u2014 Resume natural day/night cycle",
+              "/stag spawn | /stag kill \u2014 Spawn or kill the Stag boss",
+              "/freeuser <username> \u2014 Free a username reservation",
+              "/shutdown \u2014 Gracefully stop the server",
+              "/rule \u2014 Open the rule submission prompt"
+            ];
+            for (const cmd of cmds) {
+              player.send({ type: "event", kind: "source", message: cmd });
+            }
+            break;
+          }
+          if (chatText.startsWith("/w ") || chatText.startsWith("/whisper ")) {
+            const afterCmd = chatText.startsWith("/whisper ") ? chatText.slice(9) : chatText.slice(3);
+            const spaceIdx = afterCmd.indexOf(" ");
+            if (spaceIdx === -1) {
+              player.send({ type: "event", kind: "source", message: "Usage: /w <username> <message>" });
+              break;
+            }
+            const targetName = afterCmd.slice(0, spaceIdx);
+            const whisperText = afterCmd.slice(spaceIdx + 1).trim();
+            if (!whisperText) {
+              player.send({ type: "event", kind: "source", message: "Usage: /w <username> <message>" });
+              break;
+            }
+            const target = world2.playersByUsername.get(targetName);
+            if (!target) {
+              player.send({ type: "event", kind: "source", message: `Player "${targetName}" is not online.` });
+              break;
+            }
+            target.send({ type: "chat_broadcast", username: player.username, text: whisperText, whisper: true });
+            player.send({ type: "chat_broadcast", username: `To ${targetName}`, text: whisperText, whisper: true });
             break;
           }
           world2.broadcastAll({
@@ -4562,7 +5050,8 @@ var GameDatabase = class {
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
         text       TEXT NOT NULL,
         created_by TEXT NOT NULL,
-        created_at INTEGER NOT NULL
+        created_at INTEGER NOT NULL,
+        status     TEXT NOT NULL DEFAULT 'pending'
       );
 
       CREATE TABLE IF NOT EXISTS suggestions (
@@ -4600,12 +5089,35 @@ var GameDatabase = class {
         whitelist  TEXT NOT NULL DEFAULT '[]'
       );
     `);
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS bans (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        fingerprint TEXT,
+        ip          TEXT,
+        username    TEXT NOT NULL,
+        reason      TEXT NOT NULL DEFAULT '',
+        banned_at   INTEGER NOT NULL,
+        banned_by   TEXT NOT NULL DEFAULT 'admin'
+      );
+    `);
     try {
       this.db.exec(`ALTER TABLE players ADD COLUMN stat_levels TEXT NOT NULL DEFAULT '{}'`);
     } catch {
     }
     try {
       this.db.exec(`ALTER TABLE players ADD COLUMN banked_source INTEGER NOT NULL DEFAULT 0`);
+    } catch {
+    }
+    try {
+      this.db.exec(`ALTER TABLE players ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''`);
+    } catch {
+    }
+    try {
+      this.db.exec(`ALTER TABLE players ADD COLUMN last_ip TEXT NOT NULL DEFAULT ''`);
+    } catch {
+    }
+    try {
+      this.db.exec(`ALTER TABLE rules ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'`);
     } catch {
     }
   }
@@ -4627,12 +5139,14 @@ var GameDatabase = class {
       addTotalSource: this.db.prepare("UPDATE players SET total_source_generated = total_source_generated + ? WHERE token = ?"),
       getRules: this.db.prepare("SELECT * FROM rules ORDER BY created_at ASC"),
       addRule: this.db.prepare("INSERT INTO rules (text, created_by, created_at) VALUES (?, ?, ?)"),
+      updateRuleStatus: this.db.prepare("UPDATE rules SET status = ? WHERE id = ?"),
       resetAllSource: this.db.prepare("UPDATE players SET total_source_generated = 0"),
       clearRules: this.db.prepare("DELETE FROM rules"),
       getLeaderboard: this.db.prepare(
         "SELECT username, total_source_generated FROM players WHERE total_source_generated > 0 ORDER BY total_source_generated DESC LIMIT ?"
       ),
       deleteByToken: this.db.prepare("DELETE FROM players WHERE token = ?"),
+      deleteByUsername: this.db.prepare("DELETE FROM players WHERE username = ?"),
       expireUsernames: this.db.prepare("DELETE FROM players WHERE last_seen < ?"),
       resetPlayerStats: this.db.prepare(`UPDATE players SET total_source_generated = 0, stat_levels = '{}' WHERE token = ?`),
       resetPlayerSourceOnly: this.db.prepare("UPDATE players SET total_source_generated = 0 WHERE token = ?"),
@@ -4660,7 +5174,17 @@ var GameDatabase = class {
       deleteWorldState: this.db.prepare("DELETE FROM world_state WHERE key = ?"),
       addNotice: this.db.prepare("INSERT INTO admin_notices (text, created_at) VALUES (?, ?)"),
       getNotices: this.db.prepare("SELECT * FROM admin_notices ORDER BY created_at DESC"),
-      deleteNotice: this.db.prepare("DELETE FROM admin_notices WHERE id = ?")
+      deleteNotice: this.db.prepare("DELETE FROM admin_notices WHERE id = ?"),
+      // Bans
+      addBan: this.db.prepare("INSERT INTO bans (fingerprint, ip, username, reason, banned_at, banned_by) VALUES (?, ?, ?, ?, ?, ?)"),
+      removeBan: this.db.prepare("DELETE FROM bans WHERE id = ?"),
+      getBans: this.db.prepare("SELECT * FROM bans ORDER BY banned_at DESC"),
+      isBannedByFingerprint: this.db.prepare("SELECT 1 FROM bans WHERE fingerprint = ? AND fingerprint != '' LIMIT 1"),
+      isBannedByIp: this.db.prepare("SELECT 1 FROM bans WHERE ip = ? AND ip != '' LIMIT 1"),
+      // Player fingerprint/IP
+      setFingerprint: this.db.prepare("UPDATE players SET fingerprint = ? WHERE token = ?"),
+      setLastIp: this.db.prepare("UPDATE players SET last_ip = ? WHERE token = ?"),
+      getAllPlayers: this.db.prepare("SELECT token, username, fingerprint, last_ip, total_source_generated, banked_source, last_seen, created_at FROM players ORDER BY last_seen DESC")
     };
   }
   findPlayerByToken(token) {
@@ -4692,6 +5216,11 @@ var GameDatabase = class {
     });
     return claimTxn();
   }
+  /** Free a username reservation — deletes the player row entirely */
+  freeUsername(username) {
+    const result = this.stmts.deleteByUsername.run(username);
+    return result.changes > 0;
+  }
   updateLastSeen(token, now) {
     this.stmts.updateLastSeen.run(now, token);
   }
@@ -4711,7 +5240,10 @@ var GameDatabase = class {
   addRule(text, createdBy) {
     const now = Date.now();
     const info = this.stmts.addRule.run(text, createdBy, now);
-    return { id: info.lastInsertRowid, text, created_by: createdBy, created_at: now };
+    return { id: info.lastInsertRowid, text, created_by: createdBy, created_at: now, status: "pending" };
+  }
+  updateRuleStatus(id, status) {
+    this.stmts.updateRuleStatus.run(status, id);
   }
   getLeaderboard(limit = 10) {
     return this.stmts.getLeaderboard.all(limit);
@@ -4810,6 +5342,31 @@ var GameDatabase = class {
   deleteNotice(id) {
     this.stmts.deleteNotice.run(id);
   }
+  // ── Bans ──
+  addBan(fingerprint, ip, username, reason, bannedBy) {
+    this.stmts.addBan.run(fingerprint, ip, username, reason, Date.now(), bannedBy);
+  }
+  removeBan(id) {
+    this.stmts.removeBan.run(id);
+  }
+  getBans() {
+    return this.stmts.getBans.all();
+  }
+  isBanned(fingerprint, ip) {
+    if (fingerprint && this.stmts.isBannedByFingerprint.get(fingerprint)) return true;
+    if (ip && this.stmts.isBannedByIp.get(ip)) return true;
+    return false;
+  }
+  // ── Player fingerprint/IP ──
+  setFingerprint(token, fingerprint) {
+    this.stmts.setFingerprint.run(fingerprint, token);
+  }
+  setLastIp(token, ip) {
+    this.stmts.setLastIp.run(ip, token);
+  }
+  getAllPlayers() {
+    return this.stmts.getAllPlayers.all();
+  }
   close() {
     this.db.close();
   }
@@ -4817,10 +5374,10 @@ var GameDatabase = class {
 
 // server/src/db/WeeklyResetScheduler.ts
 import { execSync as execSync3 } from "child_process";
-import path4 from "path";
+import path5 from "path";
 var PHOENIX_UTC_OFFSET2 = parseInt(process.env.TIMEZONE_UTC_OFFSET || "-7", 10);
 var CHECK_INTERVAL = 6e4;
-var PROJECT_ROOT3 = path4.resolve(import.meta.dirname, "../..");
+var PROJECT_ROOT4 = path5.resolve(import.meta.dirname, "../..");
 function scheduleWeeklyReset(db2, world2) {
   let resetDoneThisWeek = false;
   setInterval(() => {
@@ -4871,11 +5428,24 @@ function resetLiveBranch() {
     console.error("[WeeklyReset] Invalid GITHUB_REPO format");
     return;
   }
+  const serverCode = process.env.SERVER_CODE;
   try {
     const remoteUrl = `https://x-access-token:${token}@github.com/${repo}.git`;
-    execSync3(`git fetch ${remoteUrl} main`, { cwd: PROJECT_ROOT3, stdio: "pipe" });
-    execSync3(`git push ${remoteUrl} FETCH_HEAD:live --force`, { cwd: PROJECT_ROOT3, stdio: "pipe" });
-    console.log("[WeeklyReset] Reset live branch to main \u2014 Railway will redeploy");
+    if (serverCode) {
+      if (!/^[a-z0-9]{6}$/.test(serverCode)) {
+        console.error("[WeeklyReset] Invalid SERVER_CODE format");
+        return;
+      }
+      const stableBranch = `community/${serverCode}/stable`;
+      const liveBranch = `community/${serverCode}/live`;
+      execSync3(`git fetch ${remoteUrl} ${stableBranch}`, { cwd: PROJECT_ROOT4, stdio: "pipe" });
+      execSync3(`git push ${remoteUrl} FETCH_HEAD:${liveBranch} --force`, { cwd: PROJECT_ROOT4, stdio: "pipe" });
+      console.log(`[WeeklyReset] Reset ${liveBranch} to ${stableBranch}`);
+    } else {
+      execSync3(`git fetch ${remoteUrl} main`, { cwd: PROJECT_ROOT4, stdio: "pipe" });
+      execSync3(`git push ${remoteUrl} FETCH_HEAD:live --force`, { cwd: PROJECT_ROOT4, stdio: "pipe" });
+      console.log("[WeeklyReset] Reset live branch to main \u2014 Railway will redeploy");
+    }
   } catch (err) {
     console.error("[WeeklyReset] Failed to reset live branch:", err);
   }
@@ -4894,13 +5464,14 @@ function startHeartbeat(world2) {
     return;
   }
   const registryUrl = process.env.REGISTRY_URL || DEFAULT_REGISTRY_URL;
-  const serverName = process.env.SERVER_NAME || "PlainScape Server";
-  const serverDesc = process.env.SERVER_DESCRIPTION || "";
-  const serverHost = process.env.SERVER_HOST || "";
-  const port = parseInt(process.env.PORT || "4800", 10);
-  const maxPlayers = parseInt(process.env.MAX_PLAYERS || String(DEFAULT_MAX_PLAYERS), 10);
-  const hasPassword = !!process.env.SERVER_PASSWORD;
   async function sendHeartbeat() {
+    const serverName = process.env.SERVER_NAME || "PlainScape Server";
+    const serverDesc = process.env.SERVER_DESCRIPTION || "";
+    const serverHost = process.env.SERVER_HOST || "";
+    const port = parseInt(process.env.PORT || "4800", 10);
+    const maxPlayers = parseInt(process.env.MAX_PLAYERS || String(DEFAULT_MAX_PLAYERS), 10);
+    const hasPassword = !!process.env.SERVER_PASSWORD;
+    const isModded = process.env.IS_MODDED === "true";
     let host = serverHost;
     if (!host) {
       try {
@@ -4923,6 +5494,7 @@ function startHeartbeat(world2) {
           maxPlayers,
           description: serverDesc,
           hasPassword,
+          isModded,
           ...patreonKey ? { patreonKey } : {},
           ...demoKey ? { demoKey } : {}
         })
@@ -4936,6 +5508,10 @@ function startHeartbeat(world2) {
           process.env.GIT_PUSH_BRANCH = data.branch;
           console.log(`[Heartbeat] Community branch assigned: ${data.branch}`);
         }
+        if (data.code && !process.env.SERVER_CODE) {
+          process.env.SERVER_CODE = data.code;
+          console.log(`[Heartbeat] Server code assigned: ${data.code}`);
+        }
       }
     } catch (err) {
       console.warn("[Heartbeat] Failed to reach registry:", err.message);
@@ -4943,18 +5519,1719 @@ function startHeartbeat(world2) {
   }
   sendHeartbeat();
   setInterval(sendHeartbeat, HEARTBEAT_INTERVAL);
-  console.log(`[Heartbeat] Sending heartbeats to ${registryUrl} as "${serverName}"`);
+  console.log(`[Heartbeat] Sending heartbeats to ${registryUrl} as "${process.env.SERVER_NAME || "PlainScape Server"}"`);
+}
+
+// server/src/admin/AdminConsole.ts
+import { execSync as execSync4, spawn } from "child_process";
+import http2 from "http";
+import fs3 from "fs";
+import path6 from "path";
+
+// server/src/admin/adminPage.ts
+function adminPageHtml(serverName, showLogin) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(serverName)} \u2014 Admin</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #141420;
+  --surface: #1a1a2e;
+  --surface2: #22223a;
+  --border: #2e2e4a;
+  --text: #d8d8e4;
+  --text-dim: #7a7a96;
+  --green: #7ec87e;
+  --green-dim: #4a8a4a;
+  --green-bg: rgba(126, 200, 126, 0.08);
+  --amber: #c9a84c;
+  --amber-dim: #8a7434;
+  --danger: #c85454;
+  --danger-dim: #7a3232;
+  --danger-bg: rgba(200, 84, 84, 0.08);
+  --radius: 6px;
+}
+
+body {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+/* \u2500\u2500 Sidebar layout \u2500\u2500 */
+.layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100vh;
+}
+
+.sidebar {
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 20px 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 20px 20px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+.sidebar-brand img {
+  width: 32px;
+  height: 32px;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 0 8px rgba(126, 200, 126, 0.3));
+}
+.sidebar-brand .name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--green);
+  line-height: 1.2;
+}
+.sidebar-brand .sub {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 20px;
+  font-size: 13px;
+  color: var(--text-dim);
+  cursor: pointer;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  transition: color 0.12s, background 0.12s;
+  border-left: 2px solid transparent;
+}
+.nav-item:hover { color: var(--text); background: rgba(255,255,255,0.02); }
+.nav-item.active {
+  color: var(--green);
+  background: var(--green-bg);
+  border-left-color: var(--green);
+}
+.nav-icon { font-size: 15px; width: 20px; text-align: center; }
+
+.sidebar-footer {
+  margin-top: auto;
+  padding: 16px 20px 0;
+  border-top: 1px solid var(--border);
+}
+.server-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 6px rgba(126, 200, 126, 0.5);
+}
+
+/* \u2500\u2500 Main content \u2500\u2500 */
+.main {
+  padding: 32px 40px;
+  max-width: 860px;
+  overflow-y: auto;
+}
+
+.page-title {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.page-desc {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 24px;
+}
+
+.panel { display: none; }
+.panel.active { display: block; }
+
+/* \u2500\u2500 Stats \u2500\u2500 */
+.stats-row {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.stat-big {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+  flex: 1;
+}
+.stat-big .num {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--green);
+  line-height: 1;
+}
+.stat-big .lbl {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+.stat-checks {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.stat-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 14px;
+}
+.stat-check .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.dot-on { background: var(--green); }
+.dot-off { background: var(--danger); }
+
+/* \u2500\u2500 Buttons \u2500\u2500 */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface2);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+}
+.btn:hover { background: var(--border); border-color: var(--text-dim); }
+.btn-primary {
+  background: var(--green-dim);
+  border-color: var(--green);
+  color: #fff;
+}
+.btn-primary:hover { background: var(--green); }
+.btn-danger {
+  background: var(--danger-dim);
+  border-color: var(--danger);
+  color: #fff;
+}
+.btn-danger:hover { background: var(--danger); }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+.btn-ghost {
+  background: none;
+  border-color: transparent;
+  color: var(--text-dim);
+}
+.btn-ghost:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+
+/* \u2500\u2500 Forms \u2500\u2500 */
+textarea, input[type="text"], input[type="password"] {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: 13px;
+  padding: 10px 12px;
+  resize: vertical;
+}
+textarea:focus, input:focus { outline: none; border-color: var(--green); }
+textarea { min-height: 200px; line-height: 1.6; }
+#panel-rules.active { display: flex; flex-direction: column; height: calc(100vh - 64px); max-width: none; }
+#panel-rules > .page-title, #panel-rules > .page-desc { flex-shrink: 0; }
+#panel-rules > .page-desc { margin-bottom: 12px; }
+.rules-split { display: flex; gap: 16px; flex: 1; min-height: 0; }
+.rules-editor-col { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.rules-editor-col textarea { flex: 1; min-height: 0; resize: none; font-size: 14px; line-height: 1.7; padding: 16px 20px; }
+.rules-active-col { width: 340px; flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; }
+.active-rules-wrap { flex: 1; overflow-y: auto; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 0; }
+.active-rules-wrap .empty-state { padding: 20px; }
+.rule-card { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.rule-card:last-child { border-bottom: none; }
+.rule-text { font-size: 13px; color: var(--text); margin-bottom: 6px; line-height: 1.5; }
+.rule-meta { font-size: 11px; color: var(--text-dim); display: flex; gap: 10px; flex-wrap: wrap; }
+.rule-meta .rule-by { color: var(--green); }
+.rule-status { font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+.rule-status-success { color: var(--green); }
+.rule-status-failed { color: var(--danger); }
+.rule-status-pending { color: var(--amber); }
+@media (max-width: 900px) {
+  .rules-split { flex-direction: column; }
+  .rules-active-col { width: 100%; max-height: 250px; }
+  .rules-editor-col textarea { min-height: 200px; }
+}
+.editor-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.editor-hint {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* \u2500\u2500 Tables \u2500\u2500 */
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { padding: 10px 12px; text-align: left; }
+th {
+  color: var(--text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+td { border-bottom: 1px solid rgba(46, 46, 74, 0.5); }
+tr:hover td { background: rgba(255,255,255,0.015); }
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.badge-online { background: rgba(126, 200, 126, 0.12); color: var(--green); }
+.badge-offline { background: rgba(255,255,255,0.04); color: var(--text-dim); }
+.badge-admin { background: rgba(201, 168, 76, 0.12); color: var(--amber); }
+
+.search-box {
+  margin-bottom: 16px;
+}
+.search-box input {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  max-width: 300px;
+}
+
+/* \u2500\u2500 Toast \u2500\u2500 */
+.toast-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 999;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+}
+.toast {
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  animation: toast-in 0.2s cubic-bezier(0.25, 1, 0.5, 1);
+}
+.toast-success { border-left: 3px solid var(--green); }
+.toast-error { border-left: 3px solid var(--danger); }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* \u2500\u2500 Login \u2500\u2500 */
+.login-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+  background: var(--bg);
+}
+.login-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 40px 36px 36px;
+  width: 340px;
+  text-align: center;
+}
+.login-box img {
+  width: 56px;
+  height: 56px;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 0 12px rgba(126, 200, 126, 0.3));
+  margin-bottom: 16px;
+}
+.login-box h1 {
+  font-size: 18px;
+  color: var(--green);
+  margin-bottom: 2px;
+}
+.login-box .login-sub {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 24px;
+}
+.login-box input {
+  margin-bottom: 12px;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+.login-box .btn { width: 100%; justify-content: center; }
+.login-error {
+  color: var(--danger);
+  font-size: 12px;
+  margin-bottom: 10px;
+  display: none;
+}
+
+/* \u2500\u2500 Section labels \u2500\u2500 */
+.section-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+
+/* \u2500\u2500 Misc \u2500\u2500 */
+.mt { margin-top: 12px; }
+.mb { margin-bottom: 16px; }
+.empty-state {
+  padding: 32px 0;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+/* \u2500\u2500 Built-in rules collapsible \u2500\u2500 */
+.builtin-rules {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 4px;
+}
+.builtin-rules summary {
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+.builtin-rules summary:hover { color: var(--text); }
+.builtin-rules-content {
+  padding: 0 14px 14px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+.builtin-rules-content ul {
+  margin: 4px 0 10px 18px;
+}
+.builtin-rules-content p {
+  margin-bottom: 2px;
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* \u2500\u2500 Config fields (Railway-style) \u2500\u2500 */
+.config-group {
+  margin-bottom: 24px;
+}
+.config-group-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.config-row {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  align-items: start;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(46, 46, 74, 0.3);
+}
+.config-row:last-child { border-bottom: none; }
+.config-label {
+  font-size: 13px;
+  font-weight: 500;
+  padding-top: 7px;
+}
+.config-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 1px;
+  font-weight: 400;
+}
+.config-input {
+  width: 100%;
+  max-width: 400px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 13px;
+  padding: 7px 10px;
+}
+.config-input:focus { outline: none; border-color: var(--green); }
+.config-input::placeholder { color: var(--text-dim); opacity: 0.6; }
+.config-input[type="number"] { max-width: 120px; }
+.config-input.secret { font-family: monospace; letter-spacing: 1px; }
+
+/* \u2500\u2500 Responsive: collapse sidebar on small screens \u2500\u2500 */
+@media (max-width: 700px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+  .sidebar {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding: 12px 0;
+  }
+  .sidebar-brand { padding: 0 16px 12px; }
+  .sidebar-footer { display: none; }
+  .nav-items { display: flex; overflow-x: auto; padding: 0 8px; gap: 0; }
+  .nav-item { border-left: none; border-bottom: 2px solid transparent; padding: 8px 14px; white-space: nowrap; }
+  .nav-item.active { border-left-color: transparent; border-bottom-color: var(--green); }
+  .main { padding: 20px 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+</style>
+</head>
+<body>
+${showLogin ? loginHtml(serverName) : appHtml(serverName)}
+</body>
+</html>`;
+}
+function esc(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function loginHtml(serverName) {
+  return `
+<div class="login-wrap">
+  <div class="login-box">
+    <img src="/logo.png" alt="Logo">
+    <h1>${esc(serverName)}</h1>
+    <div class="login-sub">Admin Console</div>
+    <div class="login-error" id="login-error">Invalid password</div>
+    <input type="password" id="login-pw" placeholder="Password" autofocus>
+    <button class="btn btn-primary" id="login-btn">Sign In</button>
+  </div>
+</div>
+<script>
+(function() {
+  var pw = document.getElementById('login-pw');
+  var btn = document.getElementById('login-btn');
+  var errEl = document.getElementById('login-error');
+  function doLogin() {
+    fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw.value })
+    }).then(function(r) { return r.json(); }).then(function(d) {
+      if (d.ok) location.reload();
+      else { errEl.style.display = 'block'; }
+    }).catch(function() {
+      errEl.textContent = 'Connection failed';
+      errEl.style.display = 'block';
+    });
+  }
+  btn.addEventListener('click', doLogin);
+  pw.addEventListener('keydown', function(e) { if (e.key === 'Enter') doLogin(); });
+})();
+</script>`;
+}
+function appHtml(serverName) {
+  return `
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <img src="/logo.png" alt="Logo">
+      <div>
+        <div class="name">${esc(serverName)}</div>
+        <div class="sub">Admin Console</div>
+      </div>
+    </div>
+    <div class="nav-items">
+      <button class="nav-item active" data-tab="dashboard">
+        <span class="nav-icon">&#9632;</span> Dashboard
+      </button>
+      <button class="nav-item" data-tab="config">
+        <span class="nav-icon">&#9881;</span> Configuration
+      </button>
+      <button class="nav-item" data-tab="rules">
+        <span class="nav-icon">&#9998;</span> Claude Rules
+      </button>
+      <button class="nav-item" data-tab="players">
+        <span class="nav-icon">&#9823;</span> Players
+      </button>
+      <button class="nav-item" data-tab="bans">
+        <span class="nav-icon">&#9888;</span> Bans
+      </button>
+      <button class="nav-item" data-tab="modding">
+        <span class="nav-icon">&#9881;</span> Modding
+      </button>
+    </div>
+    <div class="sidebar-footer">
+      <div class="server-status">
+        <span class="status-dot"></span>
+        <span id="sidebar-player-count">\u2014</span>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <!-- Dashboard -->
+    <div class="panel active" id="panel-dashboard">
+      <div class="page-title">Dashboard</div>
+      <div class="page-desc">Server overview and status</div>
+      <div class="stats-row" id="stats-row"></div>
+      <div class="stat-checks" id="stat-checks"></div>
+      <div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border);display:flex;gap:12px;">
+        <button class="btn btn-danger" id="restart-btn">Restart Server</button>
+      </div>
+    </div>
+
+    <!-- Configuration -->
+    <div class="panel" id="panel-config">
+      <div class="page-title">Configuration</div>
+      <div class="page-desc">Changes require a server restart to take effect.</div>
+      <div id="config-fields"></div>
+      <div style="margin-top:16px;display:flex;justify-content:flex-end;">
+        <button class="btn btn-primary" id="save-config-btn">Save Configuration</button>
+      </div>
+    </div>
+
+    <!-- Claude Rules -->
+    <div class="panel" id="panel-rules">
+      <div class="page-title">Claude Rules</div>
+      <div class="page-desc">Rules that constrain what the AI can do when implementing player rules. Clear the text to remove all constraints.</div>
+
+      <div class="rules-split">
+        <div class="rules-editor-col">
+          <div class="editor-bar">
+            <span class="editor-hint">AI Guardrails</span>
+            <button class="btn btn-primary btn-sm" id="save-rules-btn">Save Rules</button>
+          </div>
+          <textarea id="rules-editor" spellcheck="false" placeholder="Rules must be about gameplay only. No jokes, memes, or off-topic submissions.&#10;&#10;If a rule adds a visible entity, structure, or terrain zone, it must also appear on the minimap.&#10;&#10;Example:&#10;- Players cannot build turrets within 200 units of each other&#10;- Ghosts move 50% faster during the first hour of night"></textarea>
+        </div>
+        <div class="rules-active-col">
+          <div class="editor-bar">
+            <span class="editor-hint">Active Player Rules</span>
+          </div>
+          <div id="active-rules-wrap" class="active-rules-wrap">
+            <div class="empty-state">No active rules this cycle.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Players -->
+    <div class="panel" id="panel-players">
+      <div class="page-title">Players</div>
+      <div class="page-desc" id="player-count-desc">All registered players</div>
+      <div class="search-box">
+        <input type="text" id="player-search" placeholder="Search by username...">
+      </div>
+      <div id="players-table-wrap"></div>
+    </div>
+
+    <!-- Bans -->
+    <div class="panel" id="panel-bans">
+      <div class="page-title">Bans</div>
+      <div class="page-desc">Active bans by fingerprint and IP address</div>
+      <div id="bans-table-wrap"></div>
+    </div>
+
+    <!-- Modding -->
+    <div class="panel" id="panel-modding">
+      <div class="page-title">Modding</div>
+      <div class="page-desc">Mark your server as modded and manage your stable branch.</div>
+
+      <div class="config-group">
+        <div class="config-group-title">Server Status</div>
+        <div class="config-row" style="align-items:center">
+          <div>
+            <div class="config-label">Modded Flag</div>
+            <div class="config-hint">When enabled, your server shows a "Modded" badge in the server browser. Enable this if you've made custom code changes beyond daily rules.</div>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="checkbox" id="modded-toggle" style="width:18px;height:18px;accent-color:var(--green);cursor:pointer;">
+            <span id="modded-label" style="font-size:13px;color:var(--text-dim);">Off</span>
+          </label>
+        </div>
+        <div class="config-row">
+          <div>
+            <div class="config-label">Server Code</div>
+            <div class="config-hint">Your unique identifier assigned by the registry. Used for git branch names.</div>
+          </div>
+          <code id="server-code-display" style="font-size:14px;color:var(--green);letter-spacing:2px;">\u2014</code>
+        </div>
+      </div>
+
+      <div class="config-group">
+        <div class="config-group-title">Branch Management</div>
+        <div style="padding:12px 0;color:var(--text-dim);font-size:13px;line-height:1.6;">
+          <p>Your server has two branches: <strong style="color:var(--text)">live</strong> (running code, reset weekly) and <strong style="color:var(--text)">stable</strong> (your baseline).</p>
+          <p style="margin-top:8px;">Weekly resets revert <strong style="color:var(--text)">live</strong> back to <strong style="color:var(--text)">stable</strong>. If you've made custom mods you want to persist across resets, promote your current live code to stable.</p>
+        </div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;">
+          <button class="btn btn-primary" id="promote-stable-btn">Promote Live \u2192 Stable</button>
+        </div>
+        <div id="promote-result" style="margin-top:8px;font-size:13px;"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="toast-container" id="toasts"></div>
+
+<script>
+(function() {
+  // \u2500\u2500 Helpers \u2500\u2500
+  function api(url, opts) {
+    return fetch(url, opts)
+      .then(function(r) { return r.json(); })
+      .catch(function() {
+        toast('Request failed \u2014 check server', 'error');
+        return null;
+      });
+  }
+
+  function toast(msg, type) {
+    var c = document.getElementById('toasts');
+    var el = document.createElement('div');
+    el.className = 'toast toast-' + (type || 'success');
+    el.textContent = msg;
+    c.appendChild(el);
+    setTimeout(function() { el.remove(); }, 4000);
+  }
+
+  // \u2500\u2500 Navigation \u2500\u2500
+  var navItems = document.querySelectorAll('.nav-item');
+  navItems.forEach(function(item) {
+    item.addEventListener('click', function() {
+      navItems.forEach(function(n) { n.classList.remove('active'); });
+      item.classList.add('active');
+      document.querySelectorAll('.panel').forEach(function(p) { p.classList.remove('active'); });
+      document.getElementById('panel-' + item.dataset.tab).classList.add('active');
+      if (item.dataset.tab === 'dashboard') loadStatus();
+      if (item.dataset.tab === 'config') loadConfig();
+      if (item.dataset.tab === 'rules') loadRules();
+      if (item.dataset.tab === 'players') loadPlayers();
+      if (item.dataset.tab === 'bans') loadBans();
+      if (item.dataset.tab === 'modding') loadModding();
+    });
+  });
+
+  // \u2500\u2500 Dashboard \u2500\u2500
+  function loadStatus() {
+    api('/api/status').then(function(d) {
+      if (!d) return;
+      var row = document.getElementById('stats-row');
+      var checks = document.getElementById('stat-checks');
+      var upH = Math.floor(d.uptime / 3600000);
+      var upM = Math.floor((d.uptime % 3600000) / 60000);
+
+      // Big stats: players + uptime
+      row.textContent = '';
+      [{val: d.playerCount + ' / ' + d.maxPlayers, lbl: 'Players Online'},
+       {val: upH + 'h ' + upM + 'm', lbl: 'Uptime'}].forEach(function(s) {
+        var el = document.createElement('div');
+        el.className = 'stat-big';
+        var num = document.createElement('div');
+        num.className = 'num';
+        num.textContent = s.val;
+        var lbl = document.createElement('div');
+        lbl.className = 'lbl';
+        lbl.textContent = s.lbl;
+        el.appendChild(num);
+        el.appendChild(lbl);
+        row.appendChild(el);
+      });
+
+      // Status checks
+      checks.textContent = '';
+      [{on: true, lbl: 'Port ' + d.gamePort},
+       {on: d.hasPassword, lbl: d.hasPassword ? 'Password protected' : 'No password'},
+       {on: d.hasApiKey, lbl: d.hasApiKey ? 'AI rules enabled' : 'No API key'}].forEach(function(c) {
+        var el = document.createElement('div');
+        el.className = 'stat-check';
+        var dot = document.createElement('span');
+        dot.className = 'dot ' + (c.on ? 'dot-on' : 'dot-off');
+        var txt = document.createTextNode(c.lbl);
+        el.appendChild(dot);
+        el.appendChild(txt);
+        checks.appendChild(el);
+      });
+
+      // Sidebar player count
+      document.getElementById('sidebar-player-count').textContent =
+        d.playerCount + ' player' + (d.playerCount !== 1 ? 's' : '') + ' online';
+    });
+  }
+
+  // \u2500\u2500 Configuration \u2500\u2500
+  var configFields = [];
+  function loadConfig() {
+    api('/api/config').then(function(d) {
+      if (!d || !d.config) return;
+      configFields = d.config;
+      renderConfigFields(d.config);
+    });
+  }
+
+  function renderConfigFields(fields) {
+    var container = document.getElementById('config-fields');
+    container.textContent = '';
+    var groups = {};
+    fields.forEach(function(f) {
+      if (!groups[f.category]) groups[f.category] = [];
+      groups[f.category].push(f);
+    });
+    Object.keys(groups).forEach(function(cat) {
+      var group = document.createElement('div');
+      group.className = 'config-group';
+      var title = document.createElement('div');
+      title.className = 'config-group-title';
+      title.textContent = cat;
+      group.appendChild(title);
+      groups[cat].forEach(function(f) {
+        var row = document.createElement('div');
+        row.className = 'config-row';
+        var labelWrap = document.createElement('div');
+        var lbl = document.createElement('div');
+        lbl.className = 'config-label';
+        lbl.textContent = f.label;
+        labelWrap.appendChild(lbl);
+        if (f.hint) {
+          var hint = document.createElement('div');
+          hint.className = 'config-hint';
+          hint.textContent = f.hint;
+          labelWrap.appendChild(hint);
+        }
+        var input = document.createElement('input');
+        input.className = 'config-input';
+        if (f.type === 'secret') input.className += ' secret';
+        input.type = f.type === 'secret' ? 'password' : (f.type === 'number' ? 'number' : 'text');
+        input.name = f.key;
+        input.value = f.value;
+        input.placeholder = f.placeholder || '';
+        row.appendChild(labelWrap);
+        row.appendChild(input);
+        group.appendChild(row);
+      });
+      container.appendChild(group);
+    });
+  }
+
+  document.getElementById('save-config-btn').addEventListener('click', function() {
+    var inputs = document.querySelectorAll('.config-input');
+    var config = {};
+    inputs.forEach(function(input) {
+      config[input.name] = input.value;
+    });
+    api('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: config })
+    }).then(function(d) {
+      if (d) toast(d.message || 'Saved');
+    });
+  });
+
+  // \u2500\u2500 Restart \u2500\u2500
+  function doRestart() {
+    if (!confirm('Restart the server? All connected players will be disconnected.')) return;
+    api('/api/restart', { method: 'POST' }).then(function(d) {
+      if (d) toast('Server restarting...', 'success');
+    });
+  }
+
+  document.getElementById('restart-btn').addEventListener('click', doRestart);
+
+  // Ctrl+S save shortcut for editors
+  document.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      var rulesEditor = document.getElementById('rules-editor');
+      if (document.activeElement === rulesEditor) {
+        e.preventDefault();
+        document.getElementById('save-rules-btn').click();
+      } else if (document.activeElement && document.activeElement.classList.contains('config-input')) {
+        e.preventDefault();
+        document.getElementById('save-config-btn').click();
+      }
+    }
+  });
+
+  // \u2500\u2500 Claude Rules \u2500\u2500
+  function loadRules() {
+    api('/api/claude-rules').then(function(d) {
+      if (d) document.getElementById('rules-editor').value = d.content;
+    });
+    loadGameRules();
+  }
+
+  function loadGameRules() {
+    api('/api/game-rules').then(function(d) {
+      if (!d) return;
+      var wrap = document.getElementById('active-rules-wrap');
+      if (!d.rules || d.rules.length === 0) {
+        wrap.innerHTML = '<div class="empty-state">No active rules this cycle.</div>';
+        return;
+      }
+      wrap.innerHTML = '';
+      d.rules.forEach(function(r) {
+        var card = document.createElement('div');
+        card.className = 'rule-card';
+        var text = document.createElement('div');
+        text.className = 'rule-text';
+        text.textContent = r.text;
+        var meta = document.createElement('div');
+        meta.className = 'rule-meta';
+        var by = document.createElement('span');
+        by.className = 'rule-by';
+        by.textContent = r.createdBy;
+        var when = document.createElement('span');
+        var dt = new Date(r.createdAt);
+        when.textContent = dt.toLocaleDateString() + ' ' + dt.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+        var status = document.createElement('span');
+        status.className = 'rule-status rule-status-' + r.status;
+        status.textContent = r.status === 'success' ? 'Implemented' : r.status === 'failed' ? 'Failed' : 'Pending';
+        meta.appendChild(by);
+        meta.appendChild(when);
+        meta.appendChild(status);
+        card.appendChild(text);
+        card.appendChild(meta);
+        wrap.appendChild(card);
+      });
+    });
+  }
+
+  document.getElementById('save-rules-btn').addEventListener('click', function() {
+    api('/api/claude-rules', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: document.getElementById('rules-editor').value })
+    }).then(function(d) {
+      if (d) toast('Claude rules saved');
+    });
+  });
+
+  // \u2500\u2500 Players \u2500\u2500
+  var allPlayers = [];
+  function loadPlayers() {
+    api('/api/players').then(function(d) {
+      if (!d) return;
+      allPlayers = d.players;
+      var online = allPlayers.filter(function(p) { return p.online; }).length;
+      document.getElementById('player-count-desc').textContent =
+        allPlayers.length + ' registered, ' + online + ' online';
+      renderPlayers('');
+    });
+  }
+
+  document.getElementById('player-search').addEventListener('input', function() {
+    renderPlayers(this.value.toLowerCase());
+  });
+
+  function renderPlayers(filter) {
+    var wrap = document.getElementById('players-table-wrap');
+    var list = allPlayers.filter(function(p) {
+      return !filter || p.username.toLowerCase().indexOf(filter) !== -1;
+    });
+
+    if (allPlayers.length === 0) {
+      wrap.textContent = '';
+      var empty = document.createElement('div');
+      empty.className = 'empty-state';
+      empty.textContent = 'No players have joined this server yet.';
+      wrap.appendChild(empty);
+      return;
+    }
+
+    if (list.length === 0) {
+      wrap.textContent = '';
+      var noMatch = document.createElement('div');
+      noMatch.className = 'empty-state';
+      noMatch.textContent = 'No players match that search.';
+      wrap.appendChild(noMatch);
+      return;
+    }
+
+    // Sort: online first, then by total source desc
+    list.sort(function(a, b) {
+      if (a.online !== b.online) return b.online ? 1 : -1;
+      return (b.totalSource || 0) - (a.totalSource || 0);
+    });
+
+    var table = document.createElement('table');
+    var thead = document.createElement('thead');
+    var hrow = document.createElement('tr');
+    ['Player', 'Status', 'Source', 'Role', 'Last Seen', ''].forEach(function(h) {
+      var th = document.createElement('th');
+      th.textContent = h;
+      hrow.appendChild(th);
+    });
+    thead.appendChild(hrow);
+    table.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+    list.forEach(function(p) {
+      var tr = document.createElement('tr');
+
+      var tdName = document.createElement('td');
+      tdName.style.fontWeight = '500';
+      tdName.textContent = p.username;
+
+      var tdStatus = document.createElement('td');
+      var badge = document.createElement('span');
+      badge.className = 'badge ' + (p.online ? 'badge-online' : 'badge-offline');
+      badge.textContent = p.online ? 'Online' : 'Offline';
+      tdStatus.appendChild(badge);
+
+      var tdSource = document.createElement('td');
+      tdSource.textContent = (p.totalSource || 0).toLocaleString();
+      if (p.bankedSource > 0) {
+        var banked = document.createElement('span');
+        banked.style.cssText = 'color:var(--text-dim);margin-left:4px;font-size:11px;';
+        banked.textContent = '(' + p.bankedSource.toLocaleString() + ' banked)';
+        tdSource.appendChild(banked);
+      }
+
+      var tdRole = document.createElement('td');
+      if (p.isAdmin) {
+        var ab = document.createElement('span');
+        ab.className = 'badge badge-admin';
+        ab.textContent = 'Admin';
+        tdRole.appendChild(ab);
+      }
+
+      var tdSeen = document.createElement('td');
+      tdSeen.style.cssText = 'font-size:12px;color:var(--text-dim);';
+      if (p.online) {
+        tdSeen.textContent = 'Now';
+        tdSeen.style.color = 'var(--green)';
+      } else {
+        tdSeen.textContent = p.lastSeen ? new Date(p.lastSeen).toLocaleDateString() : '\u2014';
+      }
+
+      var tdActions = document.createElement('td');
+      tdActions.style.textAlign = 'right';
+
+      var adminBtn = document.createElement('button');
+      adminBtn.className = 'btn btn-sm btn-ghost';
+      adminBtn.textContent = p.isAdmin ? 'Remove Admin' : 'Make Admin';
+      adminBtn.addEventListener('click', function() {
+        api('/api/players/' + encodeURIComponent(p.username) + '/admin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ admin: !p.isAdmin })
+        }).then(function(d) {
+          if (d) {
+            toast(p.isAdmin ? 'Admin removed' : 'Admin granted');
+            loadPlayers();
+          }
+        });
+      });
+
+      var banBtn = document.createElement('button');
+      banBtn.className = 'btn btn-sm btn-danger';
+      banBtn.textContent = 'Ban';
+      banBtn.style.marginLeft = '6px';
+      banBtn.addEventListener('click', function() {
+        if (!confirm('Ban ' + p.username + '? This bans by fingerprint and IP.')) return;
+        var reason = prompt('Reason (optional):', '');
+        api('/api/players/' + encodeURIComponent(p.username) + '/ban', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: reason || '' })
+        }).then(function(d) {
+          if (d) {
+            toast(p.username + ' banned');
+            loadPlayers();
+          }
+        });
+      });
+
+      tdActions.appendChild(adminBtn);
+      tdActions.appendChild(banBtn);
+
+      tr.appendChild(tdName);
+      tr.appendChild(tdStatus);
+      tr.appendChild(tdSource);
+      tr.appendChild(tdRole);
+      tr.appendChild(tdSeen);
+      tr.appendChild(tdActions);
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    wrap.textContent = '';
+    wrap.appendChild(table);
+  }
+
+  // \u2500\u2500 Bans \u2500\u2500
+  function loadBans() {
+    api('/api/bans').then(function(d) {
+      if (!d) return;
+      var wrap = document.getElementById('bans-table-wrap');
+      if (!d.bans || d.bans.length === 0) {
+        wrap.textContent = '';
+        var empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'No active bans \u2014 all players in good standing.';
+        wrap.appendChild(empty);
+        return;
+      }
+
+      var table = document.createElement('table');
+      var thead = document.createElement('thead');
+      var hrow = document.createElement('tr');
+      ['Username', 'Fingerprint', 'IP', 'Reason', 'Date', ''].forEach(function(h) {
+        var th = document.createElement('th');
+        th.textContent = h;
+        hrow.appendChild(th);
+      });
+      thead.appendChild(hrow);
+      table.appendChild(thead);
+
+      var tbody = document.createElement('tbody');
+      d.bans.forEach(function(b) {
+        var tr = document.createElement('tr');
+
+        var tdUser = document.createElement('td');
+        tdUser.style.fontWeight = '500';
+        tdUser.textContent = b.username || '\u2014';
+
+        var tdFp = document.createElement('td');
+        tdFp.style.cssText = 'font-size:12px;color:var(--text-dim);font-family:monospace;';
+        tdFp.textContent = b.fingerprint ? b.fingerprint.substring(0, 12) : '\u2014';
+
+        var tdIp = document.createElement('td');
+        tdIp.style.cssText = 'font-size:12px;color:var(--text-dim);font-family:monospace;';
+        tdIp.textContent = b.ip || '\u2014';
+
+        var tdReason = document.createElement('td');
+        tdReason.textContent = b.reason || '\u2014';
+        tdReason.style.color = b.reason ? 'var(--text)' : 'var(--text-dim)';
+
+        var tdDate = document.createElement('td');
+        tdDate.style.cssText = 'font-size:12px;color:var(--text-dim);';
+        tdDate.textContent = b.banned_at ? new Date(b.banned_at).toLocaleDateString() : '\u2014';
+
+        var tdAction = document.createElement('td');
+        tdAction.style.textAlign = 'right';
+        var unbanBtn = document.createElement('button');
+        unbanBtn.className = 'btn btn-sm btn-ghost';
+        unbanBtn.textContent = 'Unban';
+        unbanBtn.addEventListener('click', function() {
+          if (!confirm('Remove ban for ' + (b.username || 'this entry') + '?')) return;
+          api('/api/bans/' + b.id + '/remove', { method: 'POST' }).then(function(d) {
+            if (d) {
+              toast('Ban removed');
+              loadBans();
+            }
+          });
+        });
+        tdAction.appendChild(unbanBtn);
+
+        tr.appendChild(tdUser);
+        tr.appendChild(tdFp);
+        tr.appendChild(tdIp);
+        tr.appendChild(tdReason);
+        tr.appendChild(tdDate);
+        tr.appendChild(tdAction);
+        tbody.appendChild(tr);
+      });
+
+      table.appendChild(tbody);
+      wrap.textContent = '';
+      wrap.appendChild(table);
+    });
+  }
+
+  // \u2500\u2500 Modding \u2500\u2500
+  function loadModding() {
+    api('/api/modded').then(function(d) {
+      if (!d) return;
+      var toggle = document.getElementById('modded-toggle');
+      var label = document.getElementById('modded-label');
+      var codeEl = document.getElementById('server-code-display');
+      toggle.checked = d.isModded;
+      label.textContent = d.isModded ? 'Modded' : 'Off';
+      label.style.color = d.isModded ? 'var(--green)' : 'var(--text-dim)';
+      codeEl.textContent = d.serverCode || '\u2014 (not registered yet)';
+    });
+  }
+
+  document.getElementById('modded-toggle').addEventListener('change', function() {
+    var isModded = this.checked;
+    var label = document.getElementById('modded-label');
+    api('/api/modded', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isModded: isModded })
+    }).then(function(d) {
+      if (d) {
+        label.textContent = isModded ? 'Modded' : 'Off';
+        label.style.color = isModded ? 'var(--green)' : 'var(--text-dim)';
+        toast(isModded ? 'Server marked as modded' : 'Modded flag removed');
+      }
+    });
+  });
+
+  document.getElementById('promote-stable-btn').addEventListener('click', function() {
+    if (!confirm('Promote current live code to stable? This overwrites your stable branch.')) return;
+    var resultEl = document.getElementById('promote-result');
+    resultEl.textContent = 'Promoting...';
+    resultEl.style.color = 'var(--text-dim)';
+    api('/api/promote-stable', { method: 'POST' }).then(function(d) {
+      if (d && d.ok) {
+        resultEl.textContent = d.message;
+        resultEl.style.color = 'var(--green)';
+        toast('Promoted to stable');
+      } else {
+        resultEl.textContent = (d && d.error) || 'Failed';
+        resultEl.style.color = 'var(--danger)';
+      }
+    });
+  });
+
+  // \u2500\u2500 Initial load \u2500\u2500
+  loadStatus();
+})();
+</script>`;
+}
+
+// server/src/admin/AdminConsole.ts
+var PROJECT_ROOT5 = findProjectRoot();
+function findProjectRoot() {
+  const fromDir = path6.resolve(import.meta.dirname, "../../..");
+  const fromDir2 = path6.resolve(import.meta.dirname, "../..");
+  try {
+    if (fs3.existsSync(path6.join(fromDir2, "client"))) return fromDir2;
+  } catch {
+  }
+  try {
+    if (fs3.existsSync(path6.join(fromDir, "client"))) return fromDir;
+  } catch {
+  }
+  return fromDir2;
+}
+var SENSITIVE_KEYS = ["ANTHROPIC_API_KEY", "PATREON_KEY", "DEMO_KEY", "REGISTRY_SECRET", "GITHUB_TOKEN", "ADMIN_CONSOLE_PASSWORD"];
+function startAdminConsole(world2) {
+  const port = parseInt(process.env.ADMIN_PORT || "4801", 10);
+  const password = process.env.ADMIN_CONSOLE_PASSWORD || "";
+  const validSessions = /* @__PURE__ */ new Set();
+  function generateSession() {
+    const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+    let s = "";
+    for (let i = 0; i < 32; i++) s += chars[Math.floor(Math.random() * chars.length)];
+    validSessions.add(s);
+    return s;
+  }
+  function isAuthed(req) {
+    if (!password) return true;
+    const cookie = req.headers.cookie || "";
+    const match = cookie.match(/admin_session=([a-z0-9]+)/);
+    return match ? validSessions.has(match[1]) : false;
+  }
+  const envPath = path6.resolve(PROJECT_ROOT5, ".env");
+  const rulesPath = path6.resolve(PROJECT_ROOT5, "claude-rules.md");
+  const logoPath = path6.resolve(PROJECT_ROOT5, "client/logo.png");
+  const serverStartTime = Date.now();
+  function readBody(req) {
+    return new Promise((resolve, reject) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk.toString();
+      });
+      req.on("end", () => resolve(body));
+      req.on("error", reject);
+    });
+  }
+  function parseJson(text) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  }
+  function json(res, data, status = 200) {
+    res.writeHead(status, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(data));
+  }
+  function err(res, message, status = 400) {
+    json(res, { error: message }, status);
+  }
+  function readCurrentSensitiveValues() {
+    const values = {};
+    try {
+      const content = fs3.readFileSync(envPath, "utf-8");
+      for (const key of SENSITIVE_KEYS) {
+        const m = content.match(new RegExp(`^${key}=(.+)$`, "m"));
+        if (m) values[key] = m[1];
+      }
+    } catch {
+    }
+    return values;
+  }
+  const server = http2.createServer(async (req, res) => {
+    try {
+      const url = new URL(req.url || "/", `http://localhost:${port}`);
+      const method = req.method || "GET";
+      const parts = url.pathname.split("/").filter(Boolean);
+      res.setHeader("Access-Control-Allow-Origin", `http://127.0.0.1:${port}`);
+      if (method === "OPTIONS") {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+      if (url.pathname === "/logo.png") {
+        try {
+          const img = fs3.readFileSync(logoPath);
+          res.writeHead(200, { "Content-Type": "image/png" });
+          res.end(img);
+        } catch {
+          res.writeHead(404);
+          res.end("Not found");
+        }
+        return;
+      }
+      if (url.pathname === "/api/auth" && method === "POST") {
+        const body = parseJson(await readBody(req));
+        if (!body) {
+          err(res, "Invalid JSON");
+          return;
+        }
+        if (body.password === password) {
+          const session = generateSession();
+          res.writeHead(200, {
+            "Content-Type": "application/json",
+            "Set-Cookie": `admin_session=${session}; Path=/; HttpOnly; SameSite=Strict`
+          });
+          res.end(JSON.stringify({ ok: true }));
+        } else {
+          err(res, "Invalid password", 401);
+        }
+        return;
+      }
+      if (!isAuthed(req)) {
+        if (url.pathname === "/" || url.pathname === "") {
+          res.writeHead(200, { "Content-Type": "text/html" });
+          res.end(adminPageHtml(process.env.SERVER_NAME || "PlainScape Server", true));
+          return;
+        }
+        err(res, "Unauthorized", 401);
+        return;
+      }
+      if (url.pathname === "/" || url.pathname === "") {
+        res.writeHead(200, { "Content-Type": "text/html" });
+        res.end(adminPageHtml(process.env.SERVER_NAME || "PlainScape Server", false));
+        return;
+      }
+      if (url.pathname === "/api/status" && method === "GET") {
+        json(res, {
+          serverName: process.env.SERVER_NAME || "PlainScape Server",
+          playerCount: world2.players.size,
+          maxPlayers: parseInt(process.env.MAX_PLAYERS || "100", 10),
+          uptime: Date.now() - serverStartTime,
+          gamePort: parseInt(process.env.PORT || "4800", 10),
+          hasPassword: !!process.env.SERVER_PASSWORD,
+          hasApiKey: !!process.env.ANTHROPIC_API_KEY
+        });
+        return;
+      }
+      if (url.pathname === "/api/config" && method === "GET") {
+        let envContent = "";
+        try {
+          envContent = fs3.readFileSync(envPath, "utf-8");
+        } catch {
+        }
+        const envMap = parseEnvFile(envContent);
+        const config = [
+          { key: "SERVER_NAME", label: "Server Name", value: envMap["SERVER_NAME"] || "", placeholder: "My PlainScape Server", category: "Server", type: "text" },
+          { key: "SERVER_DESCRIPTION", label: "Server Description", value: envMap["SERVER_DESCRIPTION"] || "", placeholder: "A community PlainScape server", category: "Server", type: "text" },
+          { key: "PORT", label: "Game Port", value: envMap["PORT"] || "4800", placeholder: "4800", category: "Server", type: "number" },
+          { key: "MAX_PLAYERS", label: "Max Players", value: envMap["MAX_PLAYERS"] || "100", placeholder: "100", category: "Server", type: "number" },
+          { key: "SERVER_PASSWORD", label: "Server Password", value: envMap["SERVER_PASSWORD"] || "", placeholder: "Leave empty for public", category: "Server", type: "password", hint: "Players will need this password to join. Leave empty for a public server." },
+          { key: "ADMIN_USERS", label: "Admin Usernames", value: envMap["ADMIN_USERS"] || "", placeholder: "User1,User2", category: "Server", type: "text", hint: "Comma-separated list of admin usernames" },
+          { key: "ANTHROPIC_API_KEY", label: "Anthropic API Key", value: envMap["ANTHROPIC_API_KEY"] ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" : "", placeholder: "sk-ant-...", category: "AI Rules", type: "secret", hint: "Required for the daily champion rule system" },
+          { key: "CLAUDE_RULE_MODEL", label: "Claude Model", value: envMap["CLAUDE_RULE_MODEL"] || "claude-opus-4-6", placeholder: "claude-opus-4-6", category: "AI Rules", type: "text", hint: "Model ID for rule implementation (e.g. claude-opus-4-6, claude-sonnet-4-6)" },
+          { key: "CLAUDE_MAX_TURNS", label: "Max Turns", value: envMap["CLAUDE_MAX_TURNS"] || "50", placeholder: "50", category: "AI Rules", type: "number", hint: "Maximum agentic turns when implementing a rule" },
+          { key: "CLAUDE_MAX_TOKENS", label: "Max Tokens per Turn", value: envMap["CLAUDE_MAX_TOKENS"] || "16384", placeholder: "16384", category: "AI Rules", type: "number", hint: "Token limit per Claude API call" },
+          { key: "TIMEZONE_UTC_OFFSET", label: "UTC Offset", value: envMap["TIMEZONE_UTC_OFFSET"] || "-7", placeholder: "-7", category: "Timing", type: "number", hint: "Your timezone offset from UTC (e.g. -7 for Phoenix)" },
+          { key: "CHAMPION_HOUR", label: "Champion Hour", value: envMap["CHAMPION_HOUR"] || "18", placeholder: "18", category: "Timing", type: "number", hint: "Hour (0-23) when the daily champion is selected" },
+          { key: "RESET_DAY", label: "Weekly Reset Day", value: envMap["RESET_DAY"] || "0", placeholder: "0", category: "Timing", type: "number", hint: "0=Sun, 1=Mon, ... 6=Sat" },
+          { key: "RESET_HOUR", label: "Weekly Reset Hour", value: envMap["RESET_HOUR"] || "20", placeholder: "20", category: "Timing", type: "number", hint: "Hour (0-23) for weekly reset" },
+          { key: "PATREON_KEY", label: "Patreon Key", value: envMap["PATREON_KEY"] ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" : "", placeholder: "", category: "Registry", type: "secret", hint: "Required to appear in the server browser" },
+          { key: "DEMO_KEY", label: "Demo Key", value: envMap["DEMO_KEY"] ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" : "", placeholder: "", category: "Registry", type: "secret", hint: "Alternative to Patreon key for testing" },
+          { key: "SERVER_HOST", label: "Public IP", value: envMap["SERVER_HOST"] || "", placeholder: "Auto-detected", category: "Registry", type: "text", hint: "Your public IP for the server browser. Auto-detected if empty." },
+          { key: "ADMIN_PORT", label: "Admin Console Port", value: envMap["ADMIN_PORT"] || "4801", placeholder: "4801", category: "Admin", type: "number" },
+          { key: "GITHUB_TOKEN", label: "GitHub Token", value: envMap["GITHUB_TOKEN"] ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" : "", placeholder: "ghp_...", category: "Git", type: "secret", hint: "GitHub PAT for pushing rule code changes" },
+          { key: "GITHUB_REPO", label: "GitHub Repo", value: envMap["GITHUB_REPO"] || "", placeholder: "owner/repo", category: "Git", type: "text", hint: "GitHub repo for rule pushes (e.g. chvolk/PlainScape-Community)" }
+        ];
+        json(res, { config });
+        return;
+      }
+      if (url.pathname === "/api/config" && method === "POST") {
+        const body = parseJson(await readBody(req));
+        if (!body || typeof body.config !== "object") {
+          err(res, "Invalid JSON");
+          return;
+        }
+        const updates = body.config;
+        let envContent = "";
+        try {
+          envContent = fs3.readFileSync(envPath, "utf-8");
+        } catch {
+        }
+        const envMap = parseEnvFile(envContent);
+        for (const [key, value] of Object.entries(updates)) {
+          if (key === "ADMIN_CONSOLE_PASSWORD") continue;
+          if (value === "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022") continue;
+          envMap[key] = value;
+        }
+        if (password && !envMap["ADMIN_CONSOLE_PASSWORD"]) {
+          envMap["ADMIN_CONSOLE_PASSWORD"] = password;
+        }
+        const lines = [];
+        const written = /* @__PURE__ */ new Set();
+        for (const line of envContent.split("\n")) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith("#")) {
+            lines.push(line);
+            continue;
+          }
+          const eqIdx = trimmed.indexOf("=");
+          if (eqIdx === -1) {
+            lines.push(line);
+            continue;
+          }
+          const key = trimmed.slice(0, eqIdx).trim();
+          written.add(key);
+          if (key in envMap) {
+            lines.push(`${key}=${envMap[key]}`);
+          }
+        }
+        for (const [key, value] of Object.entries(envMap)) {
+          if (!written.has(key) && value) {
+            lines.push(`${key}=${value}`);
+          }
+        }
+        fs3.writeFileSync(envPath, lines.join("\n"), "utf-8");
+        json(res, { ok: true, message: "Configuration saved. Restart server to apply changes." });
+        return;
+      }
+      if (url.pathname === "/api/env" && method === "GET") {
+        try {
+          const content = fs3.readFileSync(envPath, "utf-8");
+          const redacted = content.replace(
+            /^(ANTHROPIC_API_KEY|PATREON_KEY|DEMO_KEY|REGISTRY_SECRET|GITHUB_TOKEN|ADMIN_CONSOLE_PASSWORD)=(.+)$/gm,
+            (_, key, val) => `${key}=${"*".repeat(Math.min(val.length, 20))}`
+          );
+          json(res, { content, redacted });
+        } catch {
+          json(res, { content: "", redacted: "" });
+        }
+        return;
+      }
+      if (url.pathname === "/api/env" && method === "POST") {
+        const body = parseJson(await readBody(req));
+        if (!body) {
+          err(res, "Invalid JSON");
+          return;
+        }
+        let finalContent = typeof body.content === "string" ? body.content : "";
+        const currentValues = readCurrentSensitiveValues();
+        for (const key of SENSITIVE_KEYS) {
+          const re = new RegExp(`^${key}=\\*+$`, "m");
+          if (re.test(finalContent) && currentValues[key]) {
+            finalContent = finalContent.replace(re, `${key}=${currentValues[key]}`);
+          }
+        }
+        if (password) {
+          const hasPasswordLine = /^ADMIN_CONSOLE_PASSWORD=.+$/m.test(finalContent);
+          if (!hasPasswordLine) {
+            finalContent += `
+ADMIN_CONSOLE_PASSWORD=${password}
+`;
+          } else {
+            finalContent = finalContent.replace(
+              /^ADMIN_CONSOLE_PASSWORD=.*$/m,
+              `ADMIN_CONSOLE_PASSWORD=${password}`
+            );
+          }
+        }
+        fs3.writeFileSync(envPath, finalContent, "utf-8");
+        json(res, { ok: true, message: "Saved. Restart server to apply changes." });
+        return;
+      }
+      if (url.pathname === "/api/claude-rules" && method === "GET") {
+        try {
+          const content = fs3.readFileSync(rulesPath, "utf-8");
+          json(res, { content });
+        } catch {
+          json(res, { content: "" });
+        }
+        return;
+      }
+      if (url.pathname === "/api/claude-rules" && method === "POST") {
+        const body = parseJson(await readBody(req));
+        if (!body) {
+          err(res, "Invalid JSON");
+          return;
+        }
+        fs3.writeFileSync(rulesPath, body.content || "", "utf-8");
+        json(res, { ok: true });
+        return;
+      }
+      if (url.pathname === "/api/players" && method === "GET") {
+        const dbPlayers = world2.db.getAllPlayers();
+        const onlineUsernames = /* @__PURE__ */ new Set();
+        for (const [, p] of world2.players) onlineUsernames.add(p.username);
+        const players = dbPlayers.map((p) => ({
+          username: p.username,
+          fingerprint: p.fingerprint || "",
+          lastIp: p.last_ip || "",
+          totalSource: p.total_source_generated,
+          bankedSource: p.banked_source,
+          lastSeen: p.last_seen,
+          createdAt: p.created_at,
+          online: onlineUsernames.has(p.username),
+          isAdmin: isAdminCheck(p.username)
+        }));
+        json(res, { players });
+        return;
+      }
+      if (parts.length === 4 && parts[0] === "api" && parts[1] === "players" && parts[3] === "admin" && method === "POST") {
+        const username = decodeURIComponent(parts[2]);
+        const body = parseJson(await readBody(req));
+        if (!body) {
+          err(res, "Invalid JSON");
+          return;
+        }
+        const makeAdmin = !!body.admin;
+        let envContent = "";
+        try {
+          envContent = fs3.readFileSync(envPath, "utf-8");
+        } catch {
+        }
+        const currentAdmins = parseAdminUsers(envContent);
+        if (makeAdmin) {
+          currentAdmins.add(username);
+        } else {
+          currentAdmins.delete(username);
+        }
+        const newLine = `ADMIN_USERS=${[...currentAdmins].join(",")}`;
+        if (/^ADMIN_USERS=.*$/m.test(envContent)) {
+          envContent = envContent.replace(/^ADMIN_USERS=.*$/m, newLine);
+        } else {
+          envContent += `
+${newLine}
+`;
+        }
+        fs3.writeFileSync(envPath, envContent, "utf-8");
+        process.env.ADMIN_USERS = [...currentAdmins].join(",");
+        resetAdminCache();
+        json(res, { ok: true, message: "Admin updated." });
+        return;
+      }
+      if (parts.length === 4 && parts[0] === "api" && parts[1] === "players" && parts[3] === "ban" && method === "POST") {
+        const username = decodeURIComponent(parts[2]);
+        const body = parseJson(await readBody(req));
+        if (!body) {
+          err(res, "Invalid JSON");
+          return;
+        }
+        const reason = body.reason || "";
+        const dbPlayer = world2.db.findPlayerByUsername(username);
+        const fingerprint = dbPlayer?.fingerprint || "";
+        const lastIp = dbPlayer?.last_ip || "";
+        world2.db.addBan(fingerprint, lastIp, username, reason, "admin");
+        for (const [, p] of world2.players) {
+          if (p.username === username) {
+            p.ws.send(JSON.stringify({ type: "error", message: "You have been banned from this server" }));
+            p.ws.close();
+            break;
+          }
+        }
+        json(res, { ok: true });
+        return;
+      }
+      if (parts.length === 4 && parts[0] === "api" && parts[1] === "bans" && parts[3] === "remove" && method === "POST") {
+        const banId = parseInt(parts[2], 10);
+        if (!isNaN(banId)) {
+          world2.db.removeBan(banId);
+          json(res, { ok: true });
+        } else {
+          err(res, "Invalid ban ID");
+        }
+        return;
+      }
+      if (url.pathname === "/api/bans" && method === "GET") {
+        json(res, { bans: world2.db.getBans() });
+        return;
+      }
+      if (url.pathname === "/api/game-rules" && method === "GET") {
+        json(res, { rules: world2.rules });
+        return;
+      }
+      if (url.pathname === "/api/modded" && method === "POST") {
+        const body = parseJson(await readBody(req));
+        if (!body) {
+          err(res, "Invalid JSON");
+          return;
+        }
+        const isModded = !!body.isModded;
+        let envContent = "";
+        try {
+          envContent = fs3.readFileSync(envPath, "utf-8");
+        } catch {
+        }
+        const newLine = `IS_MODDED=${isModded}`;
+        if (/^IS_MODDED=.*$/m.test(envContent)) {
+          envContent = envContent.replace(/^IS_MODDED=.*$/m, newLine);
+        } else {
+          envContent += `
+${newLine}
+`;
+        }
+        fs3.writeFileSync(envPath, envContent, "utf-8");
+        process.env.IS_MODDED = String(isModded);
+        json(res, { ok: true, isModded });
+        return;
+      }
+      if (url.pathname === "/api/modded" && method === "GET") {
+        json(res, { isModded: process.env.IS_MODDED === "true", serverCode: process.env.SERVER_CODE || "" });
+        return;
+      }
+      if (url.pathname === "/api/promote-stable" && method === "POST") {
+        const token = process.env.GITHUB_TOKEN;
+        const repo = process.env.GITHUB_REPO;
+        const code = process.env.SERVER_CODE;
+        if (!token || !repo) {
+          err(res, "GITHUB_TOKEN and GITHUB_REPO required");
+          return;
+        }
+        if (!code || !/^[a-z0-9]{6}$/.test(code)) {
+          err(res, "No valid SERVER_CODE \u2014 register with the main server first");
+          return;
+        }
+        if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) {
+          err(res, "Invalid GITHUB_REPO format");
+          return;
+        }
+        const liveBranch = `community/${code}/live`;
+        const stableBranch = `community/${code}/stable`;
+        const remoteUrl = `https://x-access-token:${token}@github.com/${repo}.git`;
+        try {
+          execSync4(`git fetch ${remoteUrl} ${liveBranch}`, { cwd: PROJECT_ROOT5, stdio: "pipe", timeout: 15e3 });
+          execSync4(`git push ${remoteUrl} FETCH_HEAD:${stableBranch} --force`, { cwd: PROJECT_ROOT5, stdio: "pipe", timeout: 15e3 });
+          json(res, { ok: true, message: `Promoted ${liveBranch} \u2192 ${stableBranch}` });
+        } catch (e) {
+          console.error("[AdminConsole] Promote to stable failed:", e);
+          err(res, "Failed to promote \u2014 check git credentials", 500);
+        }
+        return;
+      }
+      if (url.pathname === "/api/restart" && method === "POST") {
+        json(res, { ok: true, message: "Server restarting..." });
+        console.log("[AdminConsole] Restart requested \u2014 spawning new process");
+        setTimeout(() => {
+          const child = spawn(process.argv[0], process.argv.slice(1), {
+            cwd: process.cwd(),
+            detached: true,
+            stdio: "inherit"
+          });
+          child.unref();
+          process.exit(0);
+        }, 500);
+        return;
+      }
+      res.writeHead(404);
+      res.end("Not found");
+    } catch (e) {
+      console.error("[AdminConsole] Error handling request:", e);
+      if (!res.headersSent) err(res, "Internal server error", 500);
+    }
+  });
+  server.listen(port, "127.0.0.1", () => {
+    console.log(`[AdminConsole] Admin console available at http://127.0.0.1:${port}`);
+  });
+}
+function parseAdminUsers(envContent) {
+  const match = envContent.match(/^ADMIN_USERS=(.*)$/m);
+  if (!match) return /* @__PURE__ */ new Set();
+  const raw = match[1].replace(/^["']|["']$/g, "");
+  return new Set(raw.split(",").map((s) => s.trim()).filter(Boolean));
+}
+function isAdminCheck(username) {
+  const raw = (process.env.ADMIN_USERS || "").replace(/^["']|["']$/g, "");
+  const admins = new Set(raw.split(",").map((s) => s.trim()).filter(Boolean));
+  return admins.has(username);
+}
+function parseEnvFile(content) {
+  const map = {};
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eqIdx = trimmed.indexOf("=");
+    if (eqIdx === -1) continue;
+    const key = trimmed.slice(0, eqIdx).trim();
+    let value = trimmed.slice(eqIdx + 1).trim();
+    if (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'")) {
+      value = value.slice(1, -1);
+    }
+    map[key] = value;
+  }
+  return map;
 }
 
 // server/src/main.ts
-loadEnv(path5.resolve(import.meta.dirname, "../../.env"));
-var dbPath = process.env.DATABASE_PATH || path5.resolve(import.meta.dirname, "../../plainscape.db");
+loadEnv(path7.resolve(import.meta.dirname, "../../.env"));
+var dbPath = process.env.DATABASE_PATH || path7.resolve(import.meta.dirname, "../../plainscape.db");
 var db = new GameDatabase(dbPath);
 console.log(`[PlainScape] Database initialized at ${dbPath}`);
 var world = new World(db);
 world.start();
 scheduleWeeklyReset(db, world);
 startServer(world);
+startAdminConsole(world);
 if (process.env.IS_MAIN_SERVER !== "true") {
   startHeartbeat(world);
 }
@@ -4980,7 +7257,7 @@ process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
 function loadEnv(filePath) {
   try {
-    const content = readFileSync(filePath, "utf-8");
+    const content = readFileSync2(filePath, "utf-8");
     for (const line of content.split("\n")) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith("#")) continue;

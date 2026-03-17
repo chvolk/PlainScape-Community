@@ -90,6 +90,8 @@ The daily champion system uses the Anthropic Claude API to implement rules. This
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ANTHROPIC_API_KEY` | *(empty)* | Your Anthropic API key. Without this, the rule system is disabled. |
+| `CLAUDE_MAX_TURNS` | `50` | Maximum agentic turns when implementing a rule |
+| `CLAUDE_MAX_TOKENS` | `16384` | Token limit per Claude API call |
 | `GITHUB_TOKEN` | *(empty)* | GitHub PAT for pushing rule code changes |
 | `GITHUB_REPO` | *(empty)* | GitHub repo (e.g. `yourname/plainscape-server`) for rule pushes |
 
@@ -102,6 +104,29 @@ The daily champion system uses the Anthropic Claude API to implement rules. This
 | `RESET_DAY` | `0` | Day of week for weekly reset (0=Sunday, 1=Monday, ..., 6=Saturday) |
 | `RESET_HOUR` | `20` | Hour (0-23) for the weekly reset |
 | `MAX_PLAYERS` | `100` | Maximum concurrent players |
+
+## Admin Console
+
+Your server includes a **web-based admin console** at `http://127.0.0.1:4801` (localhost only — not accessible from outside your machine).
+
+### Features
+
+- **Dashboard** — Live player count, uptime, and server status at a glance
+- **Configuration** — Edit all server settings through a clean UI with labeled fields (no need to edit `.env` manually). Changes require a server restart.
+- **Claude Rules** — Markdown editor for custom AI guardrails that constrain what game rules players can create
+- **Players** — Searchable player list with the ability to grant/revoke admin and ban players
+- **Bans** — View and remove bans (bans are by fingerprint + IP address)
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ADMIN_PORT` | `4801` | Port for the admin console (always localhost-only) |
+| `ADMIN_CONSOLE_PASSWORD` | *(empty)* | Optional password to protect the admin console. If not set, anyone on your machine can access it. |
+
+### Claude Rules File
+
+The `claude-rules.md` file in your server root lets you add custom guardrails for the AI rule system. These rules are appended to the AI's system prompt when processing player rule submissions. Edit it via the admin console or directly in a text editor.
 
 ## Admin Commands
 
@@ -224,9 +249,24 @@ Players can suggest rules at the Scribe NPC (200 Source) and vote on others' sug
 
 At `RESET_HOUR` on `RESET_DAY` (default Sunday 8pm):
 - All Source and stats are reset to zero
-- All active rules are cleared (game code reverts to default)
+- All active rules are cleared (game code reverts to **stable** branch)
 - The Scorched Stag respawns
 - Player name reservations persist (6-week TTL)
+
+### Modding Your Server
+
+Each community server gets two git branches: `live` (running code) and `stable` (your baseline). The weekly reset reverts `live` back to `stable`, so daily rules are temporary by default.
+
+To create a **persistently modded** server:
+
+1. Make your changes — either let AI rules accumulate, or edit the code directly
+2. Open the **Admin Console** → **Modding** tab
+3. Click **Promote Live → Stable** to save your current code as the new baseline
+4. Enable the **Modded** flag so players can see your server is customized in the browser
+
+Now when the weekly reset happens, it'll revert to your modded stable instead of vanilla. Your custom changes persist across resets while daily rules still get cleared.
+
+**Requirements**: `GITHUB_TOKEN` and `GITHUB_REPO` must be set in your `.env` for branch management to work.
 
 ### Buildings
 
@@ -285,6 +325,8 @@ Your database and settings will carry over.
 **Players can't connect** — Check your port forwarding. The server port (default 4800) must be forwarded in your router for TCP traffic.
 
 **"Rule system disabled"** — Set `ANTHROPIC_API_KEY` in your `.env` with your Anthropic API key. Get one at [console.anthropic.com](https://console.anthropic.com).
+
+**Admin console not loading** — The admin console is only accessible from `http://127.0.0.1:4801` (localhost). It cannot be accessed from other machines. If port 4801 is in use, set `ADMIN_PORT` to a different port in your `.env`.
 
 ## Links
 
