@@ -120,14 +120,18 @@
       color: #aaa;
       flex: 1;
     }
-    .color-row input[type="color"] {
+    .custom-color-btn {
       width: 36px;
       height: 24px;
-      border: none;
+      border: 2px solid rgba(255,255,255,0.2);
       border-radius: 4px;
       cursor: pointer;
-      background: none;
       padding: 0;
+      flex-shrink: 0;
+      transition: border-color 0.2s;
+    }
+    .custom-color-btn:hover, .custom-color-btn.gp-focus {
+      border-color: rgba(255,255,255,0.6);
     }
     .color-picker-row {
       display: flex;
@@ -1600,7 +1604,7 @@
     .mobile .preview-char { width: 40px; height: 52px; margin: 0 auto; }
     .mobile .color-row { gap: 6px; padding: 3px 8px; }
     .mobile .color-row span { font-size: 11px; }
-    .mobile .color-row input[type="color"] { width: 30px; height: 22px; }
+    .mobile .custom-color-btn { width: 30px; height: 22px; }
     .mobile #play-btn { padding: 10px 20px; font-size: 15px; }
     .mobile .htp-btn { font-size: 11px; padding: 6px 16px; }
     .mobile .error-msg { font-size: 11px; min-height: 14px; }
@@ -2077,6 +2081,9 @@
       .server-table th, .server-table td { padding: 8px 8px; }
       .server-list-container { max-width: 100%; }
       .browser-divider, .direct-connect { max-width: 100%; }
+      .server-search { padding: 7px 10px; font-size: 12px; }
+      .servers-pagination { padding: 5px 0; gap: 10px; font-size: 11px; }
+      .page-btn { padding: 2px 8px; font-size: 14px; }
     }
 
     /* Compact server browser on short viewports (landscape mobile) */
@@ -2090,8 +2097,11 @@
       #play-main-btn { padding: 5px 20px; font-size: 13px; border-radius: 6px; }
       .browser-divider { margin: 0; font-size: 11px; gap: 8px; }
       .server-list-container { max-height: none; overflow-y: visible; }
+      .server-search { padding: 5px 8px; font-size: 11px; }
       .server-table th { padding: 3px 6px; font-size: 10px; }
       .server-row td { padding: 3px 6px; font-size: 11px; }
+      .servers-pagination { padding: 3px 0; gap: 8px; font-size: 10px; }
+      .page-btn { padding: 1px 6px; font-size: 13px; }
       .direct-connect { display: none; }
       #server-browser > div[style*="flex"] { display: none !important; }
       #server-browser > div[style*="margin-top:10px"] { display: none !important; }
@@ -2159,12 +2169,131 @@
     .server-list-container {
       width: 100%;
       max-width: 700px;
-      max-height: 320px;
-      overflow-y: auto;
       background: rgba(0,0,0,0.3);
       border: 1px solid rgba(255,255,255,0.08);
       border-radius: 8px;
     }
+    .server-search {
+      width: 100%;
+      padding: 8px 12px;
+      background: rgba(0,0,0,0.3);
+      border: none;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      border-radius: 8px 8px 0 0;
+      color: #ccc;
+      font-size: 13px;
+      outline: none;
+      box-sizing: border-box;
+    }
+    .server-search::placeholder { color: #555; }
+    .server-search:focus { background: rgba(0,0,0,0.5); }
+    .servers-pagination {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 6px 0;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      font-size: 12px;
+      color: #888;
+    }
+    .page-btn {
+      background: none;
+      border: 1px solid rgba(255,255,255,0.15);
+      color: #ccc;
+      padding: 2px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+    }
+    .page-btn:hover:not(:disabled) { background: rgba(255,255,255,0.08); }
+    .page-btn:disabled { opacity: 0.3; cursor: default; }
+
+    /* ── Color Picker Overlay ──────────────────────── */
+    .color-picker-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+    }
+    .color-picker-panel {
+      background: #1a1a2e;
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 10px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-width: 320px;
+      width: 90vw;
+    }
+    .color-picker-preview {
+      width: 100%;
+      height: 28px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.15);
+    }
+    .color-picker-grid {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 5px;
+    }
+    .color-picker-hue-row {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 3px;
+    }
+    .color-swatch {
+      width: 100%;
+      aspect-ratio: 1;
+      border: 2px solid transparent;
+      border-radius: 4px;
+      cursor: pointer;
+      padding: 0;
+      transition: border-color 0.15s, transform 0.1s;
+    }
+    .color-swatch:hover, .color-swatch.gp-focus {
+      border-color: #fff;
+      transform: scale(1.15);
+      z-index: 1;
+    }
+    .color-swatch-selected {
+      border-color: #7ec87e !important;
+      box-shadow: 0 0 6px rgba(126,200,126,0.5);
+    }
+    .color-swatch-hue {
+      aspect-ratio: 2/1;
+      border-radius: 3px;
+    }
+    .color-picker-btns {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+    .color-picker-ok, .color-picker-cancel {
+      padding: 6px 18px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.15);
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .color-picker-ok {
+      background: #7ec87e;
+      color: #1a1a2e;
+      border-color: #7ec87e;
+      font-weight: 600;
+    }
+    .color-picker-ok:hover, .color-picker-ok.gp-focus { background: #6ab86a; }
+    .color-picker-cancel {
+      background: rgba(255,255,255,0.08);
+      color: #ccc;
+    }
+    .color-picker-cancel:hover, .color-picker-cancel.gp-focus { background: rgba(255,255,255,0.15); }
+
     .server-table {
       width: 100%;
       border-collapse: collapse;
@@ -2185,7 +2314,8 @@
       cursor: pointer;
       transition: background 0.1s;
     }
-    .server-row:hover { background: rgba(255,255,255,0.05); }
+    .server-row:hover, .server-row.gp-focus { background: rgba(255,255,255,0.05); }
+    .server-row.gp-focus { outline: 2px solid #f0c040; outline-offset: -2px; }
     .server-row td {
       padding: 8px 12px;
       font-size: 13px;
@@ -2284,6 +2414,7 @@
       </svg>
       Refresh</button></div>
     <div class="server-list-container">
+      <input type="text" id="server-search" class="server-search" placeholder="Search servers...">
       <table class="server-table">
         <thead>
           <tr>
@@ -2297,6 +2428,11 @@
         </thead>
         <tbody id="server-rows"></tbody>
       </table>
+      <div id="servers-pagination" class="servers-pagination" style="display:none">
+        <button id="servers-prev" class="page-btn" disabled>&lsaquo;</button>
+        <span id="servers-page-info">1 / 1</span>
+        <button id="servers-next" class="page-btn">&rsaquo;</button>
+      </div>
     </div>
     <div class="direct-connect">
       <input type="text" id="direct-ip" placeholder="Connect by IP:Port">
@@ -2329,18 +2465,18 @@
       <canvas id="char-preview" class="preview-char" width="80" height="100"></canvas>
       <div class="color-picker-row">
         <div class="color-pickers">
-          <label class="color-row">
+          <div class="color-row">
             <span>Skin</span>
-            <input type="color" id="skin-color" value="#e0ac69">
-          </label>
-          <label class="color-row">
+            <button type="button" id="skin-color-btn" class="custom-color-btn" style="background:#e0ac69"></button>
+          </div>
+          <div class="color-row">
             <span>Shirt</span>
-            <input type="color" id="shirt-color" value="#3b82f6">
-          </label>
-          <label class="color-row">
+            <button type="button" id="shirt-color-btn" class="custom-color-btn" style="background:#3b82f6"></button>
+          </div>
+          <div class="color-row">
             <span>Pants</span>
-            <input type="color" id="pants-color" value="#1e3a5f">
-          </label>
+            <button type="button" id="pants-color-btn" class="custom-color-btn" style="background:#1e3a5f"></button>
+          </div>
         </div>
         <button type="button" id="randomize-btn" title="Randomize colors">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -2785,6 +2921,8 @@
 
       <h3>Stats</h3>
       <p>Click the <strong>Stats</strong> button to spend Source leveling up your character. Each stat can be upgraded up to 25 times (100 Source per level). Stats include move speed, melee speed, melee range, projectile speed, projectile range, lunge AOE, lunge distance, shield duration, and knockback.</p>
+
+      <p style="font-size:11px;color:#888;margin-top:14px"><strong style="color:#f0c040">Browser tip:</strong> PlainScape runs best in Chrome or Edge. Firefox may have lower frame rates due to differences in Canvas 2D acceleration.</p>
 
       <button class="htp-close" onclick="document.getElementById('htp-modal').classList.remove('open')">Got it!</button>
     </div>

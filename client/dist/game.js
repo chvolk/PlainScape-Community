@@ -485,7 +485,6 @@ var ACTION_LABELS = {
 };
 var STORAGE_KEY = "plainscape_gamepad_bindings";
 var GamepadController = class _GamepadController {
-  conn;
   bindings;
   prevButtons = [];
   gamepadIndex = null;
@@ -500,16 +499,27 @@ var GamepadController = class _GamepadController {
   // retain last aim when stick released
   lastMoveFacing = 0;
   // retain last move direction when stick released
-  enabled = false;
+  enabled = true;
   connected = false;
   // Action callbacks (set by InputHandler)
   onAction = null;
   // Hold-to-repeat for attack actions
   holdTimers = /* @__PURE__ */ new Map();
   static HOLD_ACTIONS = /* @__PURE__ */ new Set(["punch", "lunge", "shoot"]);
-  constructor(conn2) {
-    this.conn = conn2;
+  constructor() {
     this.bindings = this.loadBindings();
+    try {
+      const gamepads = navigator.getGamepads();
+      for (let i = 0; i < gamepads.length; i++) {
+        if (gamepads[i]) {
+          this.gamepadIndex = i;
+          this.connected = true;
+          console.log(`[Gamepad] Already connected: ${gamepads[i].id}`);
+          break;
+        }
+      }
+    } catch {
+    }
     window.addEventListener("gamepadconnected", (e) => {
       this.gamepadIndex = e.gamepad.index;
       this.connected = true;
@@ -517,7 +527,6 @@ var GamepadController = class _GamepadController {
     });
     window.addEventListener("gamepaddisconnected", (e) => {
       if (e.gamepad.index === this.gamepadIndex) {
-        this.gamepadIndex = null;
         this.connected = false;
         this.moveDx = 0;
         this.moveDy = 0;
@@ -558,10 +567,26 @@ var GamepadController = class _GamepadController {
   }
   /** Call every frame from the game loop */
   poll() {
-    if (!this.enabled || this.gamepadIndex === null) return;
+    if (!this.enabled) return;
+    if (this.gamepadIndex === null) {
+      const gamepads2 = navigator.getGamepads();
+      for (let i = 0; i < gamepads2.length; i++) {
+        if (gamepads2[i]) {
+          this.gamepadIndex = i;
+          this.connected = true;
+          console.log(`[Gamepad] Detected: ${gamepads2[i].id}`);
+          break;
+        }
+      }
+      if (this.gamepadIndex === null) return;
+    }
     const gamepads = navigator.getGamepads();
     const gp = gamepads[this.gamepadIndex];
     if (!gp) return;
+    if (!this.connected) {
+      this.connected = true;
+      console.log(`[Gamepad] Reconnected: ${gp.id}`);
+    }
     const lx = gp.axes[0] ?? 0;
     const ly = gp.axes[1] ?? 0;
     this.moveDx = Math.abs(lx) > STICK_DEADZONE2 ? lx > 0 ? 1 : -1 : 0;
@@ -657,7 +682,7 @@ var GamepadController = class _GamepadController {
 };
 
 // client/src/ui/GamepadMenuNav.ts
-var FOCUSABLE_SELECTOR = 'button:not([disabled]):not([style*="display: none"]):not([style*="display:none"]), input:not([disabled]), select:not([disabled]), .sugg-vote-btn:not([disabled])';
+var FOCUSABLE_SELECTOR = 'button:not([disabled]):not([style*="display: none"]):not([style*="display:none"]), input:not([disabled]), select:not([disabled]), .sugg-vote-btn:not([disabled]), [tabindex]:not([tabindex="-1"])';
 var NAV_REPEAT_DELAY = 220;
 var GamepadMenuNav = class {
   container = null;
@@ -728,7 +753,7 @@ var GamepadMenuNav = class {
   /** Handle D-pad navigation. Returns true if consumed. */
   handleDpad(direction) {
     if (!this.container || this.items.length === 0) return false;
-    this.move(direction === "up" ? -1 : 1);
+    this.move(direction === "up" || direction === "left" ? -1 : 1);
     return true;
   }
   /** Handle analog stick for menu scrolling (call every frame from sendInput). */
@@ -825,14 +850,14 @@ var InputHandler = class {
   onTargetLock = null;
   onDemolish = null;
   onLogout = null;
-  constructor(canvas, conn2) {
+  constructor(canvas, conn2, existingGamepad) {
     this.canvas = canvas;
     this.conn = conn2;
     this.isMobile = navigator.maxTouchPoints > 0;
     if (this.isMobile) {
       this.touch = new TouchController(canvas, conn2);
     }
-    this.gamepad = new GamepadController(conn2);
+    this.gamepad = existingGamepad ?? new GamepadController();
     this.gamepad.onAction = (action, facing) => this.handleGamepadAction(action, facing);
     this.setupListeners();
   }
@@ -1011,7 +1036,8 @@ var InputHandler = class {
     }
     const buildLabel = document.getElementById("mobile-build-label");
     if (buildLabel) {
-      if (mode && this.isMobile) {
+      const touchVisible = this.isMobile && (!this.gamepad.enabled || !this.gamepad.connected || (this.touch?.enabled ?? true));
+      if (mode && touchVisible) {
         const names = { wall: "Wall", gate: "Gate", turret: "Turret", bed: "Bed" };
         buildLabel.textContent = `Tap to preview ${names[mode] || mode}, tap again to place`;
         buildLabel.style.display = "block";
@@ -1368,6 +1394,222 @@ var GameState = class {
   }
 };
 
+// client/src/rendering/atmosphere/DayCycle.ts
+var CYCLE_MS = 60 * 60 * 1e3;
+var DAWN_END = 10 * 60 * 1e3;
+var DAY_END = 30 * 60 * 1e3;
+var DUSK_END = 40 * 60 * 1e3;
+var PHASE_ORDER = ["dawn", "day", "dusk", "night"];
+var PHASE_STARTS = {
+  dawn: 0,
+  day: DAWN_END,
+  dusk: DAY_END,
+  night: DUSK_END
+};
+var PHASE_LENGTHS = {
+  dawn: DAWN_END,
+  day: DAY_END - DAWN_END,
+  dusk: DUSK_END - DAY_END,
+  night: CYCLE_MS - DUSK_END
+};
+var TRANSITION_MS = 3e3;
+var serverPhase = "day";
+var prevPhase = "day";
+var transitionStart = 0;
+{
+  const pos = Date.now() % CYCLE_MS;
+  const init = pos < DAWN_END ? "dawn" : pos < DAY_END ? "day" : pos < DUSK_END ? "dusk" : "night";
+  serverPhase = init;
+  prevPhase = init;
+}
+function setServerPhase(phase) {
+  if (phase !== serverPhase) {
+    prevPhase = serverPhase;
+    transitionStart = performance.now();
+    serverPhase = phase;
+  }
+}
+function getPhaseBlend() {
+  const idx = PHASE_ORDER.indexOf(serverPhase);
+  const nextPhase = PHASE_ORDER[(idx + 1) % 4];
+  const elapsed = performance.now() - transitionStart;
+  if (prevPhase !== serverPhase && elapsed < TRANSITION_MS) {
+    const t = elapsed / TRANSITION_MS;
+    const blend = 1 - (1 - t) * (1 - t);
+    return { phase: prevPhase, progress: 1, blend, nextPhase: serverPhase };
+  }
+  if (prevPhase !== serverPhase) {
+    prevPhase = serverPhase;
+  }
+  const pos = Date.now() % CYCLE_MS;
+  const start = PHASE_STARTS[serverPhase];
+  const len = PHASE_LENGTHS[serverPhase];
+  let elapsed2 = pos - start;
+  if (elapsed2 < 0) elapsed2 += CYCLE_MS;
+  const progress = Math.max(0, Math.min(1, elapsed2 / len));
+  return { phase: serverPhase, progress, blend: 0, nextPhase };
+}
+
+// client/src/rendering/atmosphere/SeededRandom.ts
+var SeededRandom = class _SeededRandom {
+  state;
+  constructor(seed) {
+    this.state = seed | 0;
+  }
+  next() {
+    this.state |= 0;
+    this.state = this.state + 1831565813 | 0;
+    let t = Math.imul(this.state ^ this.state >>> 15, 1 | this.state);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  }
+  static fromChunk(cx, cy) {
+    return new _SeededRandom(cx * 73856093 ^ cy * 19349663 ^ 3735928559);
+  }
+};
+
+// client/src/rendering/atmosphere/GrassSystem.ts
+var GRASS_CHUNK = 256;
+var PATCHES_PER_CHUNK = 12;
+var PALETTES = {
+  day: ["#2e6e30", "#42903e", "#5cb850"],
+  dawn: ["#367040", "#4a8848", "#60a858"],
+  dusk: ["#38583a", "#4a6a44", "#5c7a4c"],
+  night: ["#1c3820", "#264a28", "#305a30"]
+};
+function lerpColor(a, b, t) {
+  if (t <= 0) return a;
+  if (t >= 1) return b;
+  const ar = parseInt(a.slice(1, 3), 16), ag = parseInt(a.slice(3, 5), 16), ab = parseInt(a.slice(5, 7), 16);
+  const br = parseInt(b.slice(1, 3), 16), bg = parseInt(b.slice(3, 5), 16), bb = parseInt(b.slice(5, 7), 16);
+  const r = Math.round(ar + (br - ar) * t);
+  const g = Math.round(ag + (bg - ag) * t);
+  const bl = Math.round(ab + (bb - ab) * t);
+  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${bl.toString(16).padStart(2, "0")}`;
+}
+function getBlendedPalette(pb) {
+  const cur = PALETTES[pb.phase];
+  if (pb.blend <= 0) return cur;
+  const next = PALETTES[pb.nextPhase];
+  return [lerpColor(cur[0], next[0], pb.blend), lerpColor(cur[1], next[1], pb.blend), lerpColor(cur[2], next[2], pb.blend)];
+}
+function generateChunk(cx, cy) {
+  const rng = SeededRandom.fromChunk(cx, cy);
+  const patches = [];
+  const baseX = cx * GRASS_CHUNK;
+  const baseY = cy * GRASS_CHUNK;
+  for (let i = 0; i < PATCHES_PER_CHUNK; i++) {
+    patches.push({
+      x: baseX + rng.next() * GRASS_CHUNK,
+      y: baseY + rng.next() * GRASS_CHUNK,
+      variant: Math.floor(rng.next() * 4),
+      scale: 0.6 + rng.next() * 0.6,
+      windOffset: rng.next() * Math.PI * 2
+    });
+  }
+  return patches;
+}
+var chunkCache = /* @__PURE__ */ new Map();
+var MAX_CACHE = 200;
+function getChunk(cx, cy) {
+  const key = `${cx},${cy}`;
+  let patches = chunkCache.get(key);
+  if (patches) return patches;
+  if (chunkCache.size >= MAX_CACHE) {
+    const first = chunkCache.keys().next().value;
+    chunkCache.delete(first);
+  }
+  patches = generateChunk(cx, cy);
+  chunkCache.set(key, patches);
+  return patches;
+}
+function drawBlade(ctx, baseX, baseY, tipX, tipY, color, width) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(baseX, baseY);
+  ctx.quadraticCurveTo((baseX + tipX) * 0.5, (baseY + tipY) * 0.5 - 2, tipX, tipY);
+  ctx.stroke();
+}
+function drawGrassTuft(ctx, variant, scale, palette, windSkew) {
+  ctx.save();
+  ctx.scale(scale, scale);
+  const s = windSkew;
+  switch (variant) {
+    case 0:
+      drawBlade(ctx, -3, 0, -4 + s * 12, -14, palette[0], 2);
+      drawBlade(ctx, 0, 0, s * 16, -18, palette[1], 2.5);
+      drawBlade(ctx, 3, 0, 4 + s * 12, -14, palette[2], 2);
+      break;
+    case 1:
+      drawBlade(ctx, -4, 0, -5 + s * 6, -8, palette[0], 1.5);
+      drawBlade(ctx, -2, 0, -1 + s * 8, -10, palette[1], 1.8);
+      drawBlade(ctx, 0, 0, 1 + s * 8, -9, palette[2], 1.6);
+      drawBlade(ctx, 2, 0, 3 + s * 7, -8, palette[0], 1.5);
+      drawBlade(ctx, 4, 0, 5 + s * 5, -6, palette[1], 1.3);
+      break;
+    case 2:
+      drawBlade(ctx, 0, 0, s * 18, -20, palette[1], 3);
+      break;
+    case 3:
+      drawBlade(ctx, -2, 0, -6 + s * 14, -16, palette[0], 2.2);
+      drawBlade(ctx, 2, 0, 6 + s * 14, -16, palette[2], 2.2);
+      break;
+  }
+  ctx.restore();
+}
+function getVisibleGrassPositions(camX, camY, screenW, screenH) {
+  const pad = 20;
+  const left = camX - screenW / 2 - pad;
+  const top = camY - screenH / 2 - pad;
+  const right = camX + screenW / 2 + pad;
+  const bottom = camY + screenH / 2 + pad;
+  const cx0 = Math.floor(left / GRASS_CHUNK);
+  const cy0 = Math.floor(top / GRASS_CHUNK);
+  const cx1 = Math.floor(right / GRASS_CHUNK);
+  const cy1 = Math.floor(bottom / GRASS_CHUNK);
+  const positions = [];
+  for (let cx = cx0; cx <= cx1; cx++) {
+    for (let cy = cy0; cy <= cy1; cy++) {
+      const patches = getChunk(cx, cy);
+      for (const p of patches) {
+        if (p.x >= left && p.x <= right && p.y >= top && p.y <= bottom) {
+          positions.push({ x: p.x, y: p.y });
+        }
+      }
+    }
+  }
+  return positions;
+}
+function drawGrass(ctx, camX, camY, screenW, screenH, phaseBlend) {
+  const palette = getBlendedPalette(phaseBlend);
+  const now = performance.now() / 1e3;
+  const globalWind = Math.sin(now * 0.7) * 0.14;
+  const pad = 40;
+  const left = camX - screenW / 2 - pad;
+  const top = camY - screenH / 2 - pad;
+  const right = camX + screenW / 2 + pad;
+  const bottom = camY + screenH / 2 + pad;
+  const cx0 = Math.floor(left / GRASS_CHUNK);
+  const cy0 = Math.floor(top / GRASS_CHUNK);
+  const cx1 = Math.floor(right / GRASS_CHUNK);
+  const cy1 = Math.floor(bottom / GRASS_CHUNK);
+  for (let cx = cx0; cx <= cx1; cx++) {
+    for (let cy = cy0; cy <= cy1; cy++) {
+      const patches = getChunk(cx, cy);
+      for (const patch of patches) {
+        if (patch.x < left || patch.x > right || patch.y < top || patch.y > bottom) continue;
+        const windSkew = globalWind + Math.sin(now * 1.1 + patch.windOffset) * 0.08;
+        ctx.save();
+        ctx.translate(patch.x, patch.y);
+        drawGrassTuft(ctx, patch.variant, patch.scale, palette, windSkew);
+        ctx.restore();
+      }
+    }
+  }
+}
+
 // client/src/rendering/WorldRenderer.ts
 var GRASS_COLORS = {
   day: "#3f6e43",
@@ -1375,20 +1617,31 @@ var GRASS_COLORS = {
   dusk: "#3d5a4e",
   night: "#263f2b"
 };
-var GRID_COLORS = {
-  day: "rgba(0,0,0,0.08)",
-  dawn: "rgba(0,0,0,0.10)",
-  dusk: "rgba(0,0,0,0.06)",
-  night: "rgba(0,0,0,0.12)"
+var GRID_ALPHAS = {
+  day: 0.08,
+  dawn: 0.1,
+  dusk: 0.06,
+  night: 0.12
 };
+function lerpHex(a, b, t) {
+  if (t <= 0) return a;
+  if (t >= 1) return b;
+  const ar = parseInt(a.slice(1, 3), 16), ag = parseInt(a.slice(3, 5), 16), ab = parseInt(a.slice(5, 7), 16);
+  const br = parseInt(b.slice(1, 3), 16), bg = parseInt(b.slice(3, 5), 16), bb = parseInt(b.slice(5, 7), 16);
+  return `#${Math.round(ar + (br - ar) * t).toString(16).padStart(2, "0")}${Math.round(ag + (bg - ag) * t).toString(16).padStart(2, "0")}${Math.round(ab + (bb - ab) * t).toString(16).padStart(2, "0")}`;
+}
 function drawWorld(ctx, cam, screenW, screenH, phase) {
   const left = cam.x - screenW / 2;
   const top = cam.y - screenH / 2;
   const right = cam.x + screenW / 2;
   const bottom = cam.y + screenH / 2;
-  ctx.fillStyle = GRASS_COLORS[phase];
+  const pb = getPhaseBlend();
+  const grassColor = lerpHex(GRASS_COLORS[pb.phase], GRASS_COLORS[pb.nextPhase], pb.blend);
+  ctx.fillStyle = grassColor;
   ctx.fillRect(left, top, screenW, screenH);
-  ctx.strokeStyle = GRID_COLORS[phase];
+  drawGrass(ctx, cam.x, cam.y, screenW, screenH, pb);
+  const gridAlpha = GRID_ALPHAS[pb.phase] + (GRID_ALPHAS[pb.nextPhase] - GRID_ALPHAS[pb.phase]) * pb.blend;
+  ctx.strokeStyle = `rgba(0,0,0,${gridAlpha.toFixed(3)})`;
   ctx.lineWidth = 1;
   const startX = Math.floor(left / CELL_SIZE) * CELL_SIZE;
   const startY = Math.floor(top / CELL_SIZE) * CELL_SIZE;
@@ -2437,7 +2690,7 @@ function drawSelf(ctx, state2) {
   drawAttackEffect(ctx, state2.selfPos.x, state2.selfPos.y, state2.selfAnim, state2.selfFacing, state2.myId);
 }
 function drawPlayer(ctx, x, y, entity, partyMembers = []) {
-  const colors = entity.colors || { skin: "#e0ac69", shirt: "#3b82f6", pants: "#1e3a5f" };
+  const colors2 = entity.colors || { skin: "#e0ac69", shirt: "#3b82f6", pants: "#1e3a5f" };
   const size = PLAYER_SIZE;
   const half = size / 2;
   const time = Date.now() / 1e3;
@@ -2462,37 +2715,37 @@ function drawPlayer(ctx, x, y, entity, partyMembers = []) {
   ctx.beginPath();
   ctx.ellipse(0, half + 2 + bodyBob * 0.3, 10 + (isWalking ? 1 : 0), 4, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = colors.pants;
+  ctx.fillStyle = colors2.pants;
   const legW = 6;
   const legH = half - 2;
   ctx.fillRect(-half + 2, 2 + leftLegOff * 0.4 + bodyBob, legW, legH - leftLegOff * 0.2);
   ctx.fillRect(half - legW - 2, 2 + rightLegOff * 0.4 + bodyBob, legW, legH - rightLegOff * 0.2);
-  ctx.fillStyle = darkenColor(colors.pants, 0.3);
+  ctx.fillStyle = darkenColor(colors2.pants, 0.3);
   ctx.fillRect(-half + 2, legH + leftLegOff * 0.2 + bodyBob, legW, 3);
   ctx.fillRect(half - legW - 2, legH + rightLegOff * 0.2 + bodyBob, legW, 3);
   ctx.save();
   ctx.rotate(tilt);
   ctx.translate(0, bodyBob + breathe);
-  ctx.fillStyle = colors.shirt;
+  ctx.fillStyle = colors2.shirt;
   ctx.beginPath();
   ctx.roundRect(-half, -half, size, half + 4, 2);
   ctx.fill();
-  ctx.fillStyle = darkenColor(colors.shirt, 0.15);
+  ctx.fillStyle = darkenColor(colors2.shirt, 0.15);
   ctx.beginPath();
   ctx.roundRect(-half, -half, size / 2, half + 4, [2, 0, 0, 2]);
   ctx.fill();
-  ctx.strokeStyle = darkenColor(colors.shirt, 0.2);
+  ctx.strokeStyle = darkenColor(colors2.shirt, 0.2);
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(-3, -half);
   ctx.lineTo(0, -half + 4);
   ctx.lineTo(3, -half);
   ctx.stroke();
-  ctx.fillStyle = colors.skin;
+  ctx.fillStyle = colors2.skin;
   ctx.beginPath();
   ctx.arc(0, -half - 5, 7, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = darkenColor(colors.skin, 0.35);
+  ctx.fillStyle = darkenColor(colors2.skin, 0.35);
   ctx.beginPath();
   ctx.arc(0, -half - 9, 5, Math.PI, 0);
   ctx.fill();
@@ -2518,7 +2771,7 @@ function drawPlayer(ctx, x, y, entity, partyMembers = []) {
     const shoulderY = bodyBob + breathe - 2;
     const leftShoulderX = -half - 2;
     const rightShoulderX = half + 2;
-    ctx.strokeStyle = colors.shirt;
+    ctx.strokeStyle = colors2.shirt;
     ctx.lineWidth = 4;
     ctx.lineCap = "round";
     ctx.beginPath();
@@ -2529,7 +2782,7 @@ function drawPlayer(ctx, x, y, entity, partyMembers = []) {
     ctx.moveTo(rightShoulderX, shoulderY);
     ctx.lineTo(gripX + 1, gripY);
     ctx.stroke();
-    ctx.fillStyle = colors.skin;
+    ctx.fillStyle = colors2.skin;
     ctx.beginPath();
     ctx.arc(gripX - 1, gripY, 2.5, 0, Math.PI * 2);
     ctx.arc(gripX + 1, gripY + 1, 2.5, 0, Math.PI * 2);
@@ -3457,6 +3710,263 @@ function drawBuildPreview(ctx, btype, worldX, worldY, playerX, playerY, playerSo
   ctx.fillText(btype, centerX, centerY + 4);
 }
 
+// client/src/rendering/atmosphere/WeatherSystem.ts
+var MAX_WIND_LINES = 40;
+var windLines = [];
+var currentWavy = false;
+function spawnWindLine(camX, camY, screenW, screenH) {
+  return {
+    wx: camX - screenW / 2 - 50,
+    wy: camY - screenH / 2 + Math.random() * screenH,
+    speed: 100 + Math.random() * 80,
+    length: currentWavy ? 40 + Math.random() * 60 : 30 + Math.random() * 50,
+    opacity: 0.04 + Math.random() * 0.06,
+    wavy: currentWavy,
+    waveAmp: 3 + Math.random() * 5,
+    wavePhase: Math.random() * Math.PI * 2
+  };
+}
+function updateWindLines(dt, camX, camY, screenW, screenH, intensity, wavy) {
+  currentWavy = wavy;
+  const target = Math.floor(MAX_WIND_LINES * intensity);
+  while (windLines.length < target) windLines.push(spawnWindLine(camX, camY, screenW, screenH));
+  const rightEdge = camX + screenW / 2 + 60;
+  for (let i = windLines.length - 1; i >= 0; i--) {
+    windLines[i].wx += windLines[i].speed * dt;
+    if (windLines[i].wx > rightEdge) {
+      if (i < target) windLines[i] = spawnWindLine(camX, camY, screenW, screenH);
+      else windLines.splice(i, 1);
+    }
+  }
+}
+function drawWindLines(ctx, camX, camY, screenW, screenH) {
+  for (const l of windLines) {
+    const sx = l.wx - camX + screenW / 2;
+    const sy = l.wy - camY + screenH / 2;
+    ctx.strokeStyle = `rgba(255,255,255,${l.opacity})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    if (l.wavy) {
+      const segs = 4;
+      const segLen = l.length / segs;
+      for (let s = 0; s < segs; s++) {
+        const dir = s % 2 === 0 ? -1 : 1;
+        ctx.quadraticCurveTo(
+          sx + segLen * (s + 0.5),
+          sy + dir * l.waveAmp,
+          sx + segLen * (s + 1),
+          sy
+        );
+      }
+    } else {
+      ctx.lineTo(sx + l.length, sy - 2);
+    }
+    ctx.stroke();
+  }
+}
+var FIREFLY_CHUNK = 512;
+var FIREFLIES_PER_CHUNK = 1;
+function drawFirefliesWorldSpace(ctx, camX, camY, screenW, screenH, intensity, time) {
+  const pad = 30;
+  const left = camX - screenW / 2 - pad;
+  const top = camY - screenH / 2 - pad;
+  const right = camX + screenW / 2 + pad;
+  const bottom = camY + screenH / 2 + pad;
+  const cx0 = Math.floor(left / FIREFLY_CHUNK);
+  const cy0 = Math.floor(top / FIREFLY_CHUNK);
+  const cx1 = Math.floor(right / FIREFLY_CHUNK);
+  const cy1 = Math.floor(bottom / FIREFLY_CHUNK);
+  for (let cx = cx0; cx <= cx1; cx++) {
+    for (let cy = cy0; cy <= cy1; cy++) {
+      const rng = SeededRandom.fromChunk(cx * 31 + 5, cy * 37 + 11);
+      for (let i = 0; i < FIREFLIES_PER_CHUNK; i++) {
+        const fx = cx * FIREFLY_CHUNK + rng.next() * FIREFLY_CHUNK;
+        const fy = cy * FIREFLY_CHUNK + rng.next() * FIREFLY_CHUNK;
+        if (fx < left || fx > right || fy < top || fy > bottom) continue;
+        const pulsePhase = rng.next() * Math.PI * 2;
+        const driftX = rng.next() * Math.PI * 2;
+        const driftY = rng.next() * Math.PI * 2;
+        const size = 1.5 + rng.next() * 1.5;
+        const dx = Math.sin(time * 0.6 + driftX) * 8;
+        const dy = Math.sin(time * 0.45 + driftY) * 6;
+        const sx = fx + dx - camX + screenW / 2;
+        const sy = fy + dy - camY + screenH / 2;
+        const pulse = (Math.sin(time * 2.5 + pulsePhase) + 1) * 0.5;
+        const alpha = (0.2 + pulse * 0.6) * intensity;
+        const r = size + pulse * 1.5;
+        ctx.beginPath();
+        ctx.arc(sx, sy, r * 3, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255,230,100,${(alpha * 0.12).toFixed(3)})`;
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(sx, sy, r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255,240,140,${alpha.toFixed(3)})`;
+        ctx.fill();
+      }
+    }
+  }
+}
+var MAX_RAIN = 100;
+var raindrops = [];
+var splashes = [];
+function spawnRaindrop(w, h) {
+  return {
+    x: Math.random() * (w + 100) - 50,
+    y: -10 - Math.random() * 60,
+    speed: 400 + Math.random() * 200,
+    length: 8 + Math.random() * 12
+  };
+}
+function updateRain(dt, w, h, intensity) {
+  const target = Math.floor(MAX_RAIN * intensity);
+  while (raindrops.length < target) raindrops.push(spawnRaindrop(w, h));
+  for (let i = raindrops.length - 1; i >= 0; i--) {
+    raindrops[i].y += raindrops[i].speed * dt;
+    raindrops[i].x += 40 * dt;
+    if (raindrops[i].y > h + 10) {
+      if (splashes.length < 20) {
+        splashes.push({ x: raindrops[i].x, y: h - 5 + Math.random() * 10, life: 0.2, size: 1 + Math.random() * 1.5 });
+      }
+      if (i < target) raindrops[i] = spawnRaindrop(w, h);
+      else raindrops.splice(i, 1);
+    }
+  }
+  for (let i = splashes.length - 1; i >= 0; i--) {
+    splashes[i].life -= dt;
+    if (splashes[i].life <= 0) splashes.splice(i, 1);
+  }
+}
+function drawRain(ctx) {
+  ctx.strokeStyle = "rgba(160,180,210,0.25)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (const d of raindrops) {
+    ctx.moveTo(d.x, d.y);
+    ctx.lineTo(d.x + d.length * 0.32, d.y + d.length);
+  }
+  ctx.stroke();
+  for (const s of splashes) {
+    const a = s.life / 0.2;
+    ctx.fillStyle = `rgba(180,200,230,${(a * 0.3).toFixed(3)})`;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.size * (1 - a * 0.3), 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+var DEW_CYCLE = 4;
+function drawDewDrops(ctx, camX, camY, screenW, screenH, intensity, time) {
+  const grassPositions = getVisibleGrassPositions(camX, camY, screenW, screenH);
+  for (const gp of grassPositions) {
+    const hash = (gp.x * 73856093 ^ gp.y * 19349663) >>> 0;
+    if (hash % 3 !== 0) continue;
+    const sx = gp.x - camX + screenW / 2;
+    const sy = gp.y - camY + screenH / 2;
+    const phaseOffset = hash % 1e3 / 1e3 * DEW_CYCLE;
+    const cycleT = (time + phaseOffset) % DEW_CYCLE / DEW_CYCLE;
+    if (cycleT < 0.6) {
+      const formT = cycleT / 0.6;
+      const r = 1 + formT * 1;
+      const alpha = (0.2 + formT * 0.4) * intensity;
+      ctx.beginPath();
+      ctx.arc(sx, sy, r * 2, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(200,230,255,${(alpha * 0.15).toFixed(3)})`;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(220,240,255,${alpha.toFixed(3)})`;
+      ctx.fill();
+    } else if (cycleT < 0.7) {
+      const fallT = (cycleT - 0.6) / 0.1;
+      const dropY = sy + fallT * 4;
+      const r = 2 * (1 - fallT * 0.5);
+      const alpha = 0.5 * (1 - fallT) * intensity;
+      ctx.beginPath();
+      ctx.arc(sx, dropY, r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(220,240,255,${alpha.toFixed(3)})`;
+      ctx.fill();
+    } else {
+      const splashT = (cycleT - 0.7) / 0.3;
+      const ringR = 2 + splashT * 6;
+      const alpha = 0.4 * (1 - splashT) * intensity;
+      ctx.beginPath();
+      ctx.arc(sx, sy + 4, ringR, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(200,230,255,${alpha.toFixed(3)})`;
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+      if (splashT < 0.5) {
+        const dotAlpha = 0.3 * (1 - splashT * 2) * intensity;
+        const spread = 2 + splashT * 5;
+        ctx.fillStyle = `rgba(220,240,255,${dotAlpha.toFixed(3)})`;
+        ctx.beginPath();
+        ctx.arc(sx - spread, sy + 3, 0.8, 0, Math.PI * 2);
+        ctx.arc(sx + spread, sy + 3, 0.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+}
+var lastTime = 0;
+function drawWeather(ctx, screenW, screenH, phaseBlend, camX, camY) {
+  const now = performance.now() / 1e3;
+  const dt = lastTime > 0 ? Math.min(now - lastTime, 0.05) : 1 / 60;
+  lastTime = now;
+  let windIntensity = 0;
+  let fireflyIntensity = 0;
+  let rainIntensity = 0;
+  let dewIntensity = 0;
+  switch (phaseBlend.phase) {
+    case "day":
+      windIntensity = 1;
+      if (phaseBlend.blend > 0) {
+        windIntensity = 1 - phaseBlend.blend * 0.7;
+        fireflyIntensity = phaseBlend.blend;
+      }
+      break;
+    case "dusk":
+      fireflyIntensity = 1;
+      windIntensity = 0.3;
+      if (phaseBlend.blend > 0) {
+        fireflyIntensity = 1 - phaseBlend.blend;
+        rainIntensity = phaseBlend.blend;
+        windIntensity = 0.3 + phaseBlend.blend * 0.4;
+      }
+      break;
+    case "night":
+      rainIntensity = 1;
+      windIntensity = 0.5;
+      if (phaseBlend.blend > 0) {
+        rainIntensity = 1 - phaseBlend.blend;
+        dewIntensity = phaseBlend.blend;
+        windIntensity = 0.5 - phaseBlend.blend * 0.3;
+      }
+      break;
+    case "dawn":
+      dewIntensity = 1 - phaseBlend.progress;
+      windIntensity = 0.2 + phaseBlend.progress * 0.5;
+      if (phaseBlend.blend > 0) {
+        dewIntensity *= 1 - phaseBlend.blend;
+        windIntensity = 0.7 + phaseBlend.blend * 0.3;
+      }
+      break;
+  }
+  if (windIntensity > 0.01) {
+    const isDay = phaseBlend.phase === "day" || phaseBlend.phase === "dawn" && phaseBlend.blend > 0.5;
+    updateWindLines(dt, camX, camY, screenW, screenH, windIntensity, isDay);
+    drawWindLines(ctx, camX, camY, screenW, screenH);
+  }
+  if (fireflyIntensity > 0.01) {
+    drawFirefliesWorldSpace(ctx, camX, camY, screenW, screenH, fireflyIntensity, now);
+  }
+  if (rainIntensity > 0.01) {
+    updateRain(dt, screenW, screenH, rainIntensity);
+    drawRain(ctx);
+  }
+  if (dewIntensity > 0.01) {
+    drawDewDrops(ctx, camX, camY, screenW, screenH, dewIntensity, now);
+  }
+}
+
 // client/src/rendering/Renderer.ts
 var Renderer = class {
   canvas;
@@ -3478,6 +3988,7 @@ var Renderer = class {
   }
   render() {
     const { ctx, canvas, state: state2 } = this;
+    if (state2.myId > 0) setServerPhase(state2.dayPhase);
     state2.updateCamera();
     const cam = { x: state2.cameraX, y: state2.cameraY };
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -3515,6 +4026,8 @@ var Renderer = class {
     ctx.restore();
     drawHud(ctx, state2, canvas);
     this.drawNightOverlay(ctx, canvas);
+    const pb = getPhaseBlend();
+    drawWeather(ctx, canvas.width, canvas.height, pb, cam.x, cam.y);
     if (this.input.touch?.enabled) {
       this.input.touch.draw(ctx, canvas);
     }
@@ -3736,7 +4249,7 @@ var Renderer = class {
     ctx.restore();
   }
   addExplosion(x, y, kind) {
-    const colors = kind === "lion" ? ["#c4873a", "#ff6633", "#ffaa44", "#ffe066", "#fff"] : kind === "turret" ? ["#ff4400", "#ff6622", "#ffaa33", "#ffcc44", "#fff"] : ["#aabbff", "#7799ee", "#55aaff", "#ddeeff", "#fff"];
+    const colors2 = kind === "lion" ? ["#c4873a", "#ff6633", "#ffaa44", "#ffe066", "#fff"] : kind === "turret" ? ["#ff4400", "#ff6622", "#ffaa33", "#ffcc44", "#fff"] : ["#aabbff", "#7799ee", "#55aaff", "#ddeeff", "#fff"];
     const count = kind === "turret" ? 12 : 20;
     const maxSpeed = kind === "turret" ? 80 : 120;
     for (let i = 0; i < count; i++) {
@@ -3750,7 +4263,7 @@ var Renderer = class {
         life: 0,
         maxLife: 0.4 + Math.random() * 0.4,
         size: 2 + Math.random() * 4,
-        color: colors[Math.floor(Math.random() * colors.length)]
+        color: colors2[Math.floor(Math.random() * colors2.length)]
       });
     }
   }
@@ -3798,52 +4311,195 @@ var Renderer = class {
     ctx.restore();
   }
   drawNightOverlay(ctx, canvas) {
-    switch (this.state.dayPhase) {
-      case "night":
-        ctx.fillStyle = "rgba(10, 10, 40, 0.35)";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        break;
-      case "dusk":
-        ctx.fillStyle = "rgba(40, 10, 50, 0.15)";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        break;
-      case "dawn":
-        ctx.fillStyle = "rgba(30, 20, 50, 0.20)";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        break;
-      case "day":
-        break;
+    const pb = getPhaseBlend();
+    const tints = {
+      day: [0, 0, 0, 0],
+      dawn: [30, 20, 50, 0.2],
+      dusk: [40, 10, 50, 0.15],
+      night: [10, 10, 40, 0.35]
+    };
+    const cur = tints[pb.phase];
+    const next = tints[pb.nextPhase];
+    const r = cur[0] + (next[0] - cur[0]) * pb.blend;
+    const g = cur[1] + (next[1] - cur[1]) * pb.blend;
+    const b = cur[2] + (next[2] - cur[2]) * pb.blend;
+    const a = cur[3] + (next[3] - cur[3]) * pb.blend;
+    if (a > 5e-3) {
+      ctx.fillStyle = `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b)},${a.toFixed(3)})`;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
   }
 };
 
+// client/src/ui/ColorPicker.ts
+var PRESETS = [
+  // Skin tones
+  "#f5d0a9",
+  "#e0ac69",
+  "#c68642",
+  "#8d5524",
+  "#613318",
+  "#3b1e08",
+  // Warm colors
+  "#e74c3c",
+  "#c0392b",
+  "#e67e22",
+  "#d35400",
+  "#f1c40f",
+  "#f39c12",
+  // Cool colors
+  "#3498db",
+  "#2980b9",
+  "#1abc9c",
+  "#16a085",
+  "#2ecc71",
+  "#27ae60",
+  // Purples & pinks
+  "#9b59b6",
+  "#8e44ad",
+  "#e84393",
+  "#fd79a8",
+  "#a29bfe",
+  "#6c5ce7",
+  // Neutrals
+  "#ecf0f1",
+  "#bdc3c7",
+  "#95a5a6",
+  "#7f8c8d",
+  "#34495e",
+  "#2c3e50"
+];
+var HUE_STEPS = 24;
+var activeOverlay = null;
+var savedMenuNav = null;
+function openColorPicker(anchorEl, currentColor, onConfirm, menuNav) {
+  closeColorPicker();
+  let selectedColor = currentColor;
+  const overlay = document.createElement("div");
+  overlay.className = "color-picker-overlay";
+  activeOverlay = overlay;
+  const panel = document.createElement("div");
+  panel.className = "color-picker-panel";
+  const preview = document.createElement("div");
+  preview.className = "color-picker-preview";
+  preview.style.background = selectedColor;
+  panel.appendChild(preview);
+  const grid = document.createElement("div");
+  grid.className = "color-picker-grid";
+  for (const color of PRESETS) {
+    const swatch = document.createElement("button");
+    swatch.className = "color-swatch";
+    swatch.style.background = color;
+    if (color.toLowerCase() === selectedColor.toLowerCase()) {
+      swatch.classList.add("color-swatch-selected");
+    }
+    swatch.addEventListener("click", () => {
+      selectedColor = color;
+      preview.style.background = color;
+      grid.querySelectorAll(".color-swatch-selected").forEach((el) => el.classList.remove("color-swatch-selected"));
+      swatch.classList.add("color-swatch-selected");
+    });
+    grid.appendChild(swatch);
+  }
+  panel.appendChild(grid);
+  const hueRow = document.createElement("div");
+  hueRow.className = "color-picker-hue-row";
+  for (let i = 0; i < HUE_STEPS; i++) {
+    const hue = Math.round(i / HUE_STEPS * 360);
+    const color = `hsl(${hue}, 70%, 50%)`;
+    const swatch = document.createElement("button");
+    swatch.className = "color-swatch color-swatch-hue";
+    swatch.style.background = color;
+    swatch.addEventListener("click", () => {
+      selectedColor = hslToHex(hue, 70, 50);
+      preview.style.background = selectedColor;
+      grid.querySelectorAll(".color-swatch-selected").forEach((el) => el.classList.remove("color-swatch-selected"));
+    });
+    hueRow.appendChild(swatch);
+  }
+  panel.appendChild(hueRow);
+  const btnRow = document.createElement("div");
+  btnRow.className = "color-picker-btns";
+  const okBtn = document.createElement("button");
+  okBtn.className = "color-picker-ok";
+  okBtn.textContent = "OK";
+  okBtn.addEventListener("click", () => {
+    onConfirm(selectedColor);
+    closeColorPicker();
+  });
+  const cancelBtn = document.createElement("button");
+  cancelBtn.className = "color-picker-cancel";
+  cancelBtn.textContent = "Cancel";
+  cancelBtn.addEventListener("click", closeColorPicker);
+  btnRow.appendChild(okBtn);
+  btnRow.appendChild(cancelBtn);
+  panel.appendChild(btnRow);
+  overlay.appendChild(panel);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) closeColorPicker();
+  });
+  document.body.appendChild(overlay);
+  if (menuNav) {
+    savedMenuNav = menuNav;
+    menuNav.activate(panel, closeColorPicker);
+  }
+}
+function closeColorPicker() {
+  if (activeOverlay) {
+    activeOverlay.remove();
+    activeOverlay = null;
+  }
+  if (savedMenuNav) {
+    savedMenuNav.deactivate();
+    savedMenuNav = null;
+  }
+}
+function hslToHex(h, s, l) {
+  s /= 100;
+  l /= 100;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n) => {
+    const k = (n + h / 30) % 12;
+    const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+    return Math.round(255 * color).toString(16).padStart(2, "0");
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
+
 // client/src/ui/LobbyScreen.ts
-function setupLobby(onJoin, serverUrl) {
+var colors = { skin: "#e0ac69", shirt: "#3b82f6", pants: "#1e3a5f" };
+function setupLobby(onJoin, serverUrl, menuNav) {
   const serverHost = serverUrl || window.location.host;
   const tokenKey = `plainscape_token_${serverHost}`;
   const joinScreen = document.getElementById("join-screen");
   const usernameInput = document.getElementById("username");
-  const skinColor = document.getElementById("skin-color");
-  const shirtColor = document.getElementById("shirt-color");
-  const pantsColor = document.getElementById("pants-color");
+  const skinBtn = document.getElementById("skin-color-btn");
+  const shirtBtn = document.getElementById("shirt-color-btn");
+  const pantsBtn = document.getElementById("pants-color-btn");
   const playBtn = document.getElementById("play-btn");
   const passwordInput = document.getElementById("server-password");
   const errorMsg = document.getElementById("error-msg");
   const preview = document.getElementById("char-preview");
+  function setColor(part, hex) {
+    colors[part] = hex;
+    const btn = part === "skin" ? skinBtn : part === "shirt" ? shirtBtn : pantsBtn;
+    btn.style.background = hex;
+    drawPreview();
+  }
   function drawPreview() {
     const ctx = preview.getContext("2d");
     ctx.clearRect(0, 0, 80, 100);
     const cx = 40;
     const cy = 50;
-    ctx.fillStyle = pantsColor.value;
+    ctx.fillStyle = colors.pants;
     ctx.fillRect(cx - 14, cy + 4, 28, 20);
-    ctx.fillStyle = shirtColor.value;
+    ctx.fillStyle = colors.shirt;
     ctx.fillRect(cx - 14, cy - 16, 28, 22);
-    ctx.fillStyle = skinColor.value;
+    ctx.fillStyle = colors.skin;
     ctx.beginPath();
     ctx.arc(cx, cy - 24, 10, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = skinColor.value;
+    ctx.fillStyle = colors.skin;
     ctx.fillRect(cx - 20, cy - 10, 6, 16);
     ctx.fillRect(cx + 14, cy - 10, 6, 16);
   }
@@ -3853,27 +4509,39 @@ function setupLobby(onJoin, serverUrl) {
   const savedPants = localStorage.getItem("plainscape_pants");
   if (savedUsername) {
     usernameInput.value = savedUsername;
-    if (savedSkin) skinColor.value = savedSkin;
-    if (savedShirt) shirtColor.value = savedShirt;
-    if (savedPants) pantsColor.value = savedPants;
+    if (savedSkin) colors.skin = savedSkin;
+    if (savedShirt) colors.shirt = savedShirt;
+    if (savedPants) colors.pants = savedPants;
   } else {
     const randHex = () => "#" + Math.floor(Math.random() * 16777215).toString(16).padStart(6, "0");
-    skinColor.value = randHex();
-    shirtColor.value = randHex();
-    pantsColor.value = randHex();
+    colors.skin = randHex();
+    colors.shirt = randHex();
+    colors.pants = randHex();
   }
+  skinBtn.style.background = colors.skin;
+  shirtBtn.style.background = colors.shirt;
+  pantsBtn.style.background = colors.pants;
   drawPreview();
-  skinColor.addEventListener("input", drawPreview);
-  shirtColor.addEventListener("input", drawPreview);
-  pantsColor.addEventListener("input", drawPreview);
+  const openPicker = (part, btn) => {
+    openColorPicker(btn, colors[part], (hex) => {
+      setColor(part, hex);
+      if (menuNav) {
+        const form = joinScreen.querySelector(".join-form");
+        if (form) menuNav.activate(form, () => {
+        });
+      }
+    }, menuNav);
+  };
+  skinBtn.addEventListener("click", () => openPicker("skin", skinBtn));
+  shirtBtn.addEventListener("click", () => openPicker("shirt", shirtBtn));
+  pantsBtn.addEventListener("click", () => openPicker("pants", pantsBtn));
   const randomizeBtn = document.getElementById("randomize-btn");
   if (randomizeBtn) {
     randomizeBtn.addEventListener("click", () => {
       const randHex = () => "#" + Math.floor(Math.random() * 16777215).toString(16).padStart(6, "0");
-      skinColor.value = randHex();
-      shirtColor.value = randHex();
-      pantsColor.value = randHex();
-      drawPreview();
+      setColor("skin", randHex());
+      setColor("shirt", randHex());
+      setColor("pants", randHex());
     });
   }
   function doJoin() {
@@ -3896,17 +4564,17 @@ function setupLobby(onJoin, serverUrl) {
       localStorage.setItem(tokenKey, token);
     }
     localStorage.setItem("plainscape_username", username);
-    localStorage.setItem("plainscape_skin", skinColor.value);
-    localStorage.setItem("plainscape_shirt", shirtColor.value);
-    localStorage.setItem("plainscape_pants", pantsColor.value);
+    localStorage.setItem("plainscape_skin", colors.skin);
+    localStorage.setItem("plainscape_shirt", colors.shirt);
+    localStorage.setItem("plainscape_pants", colors.pants);
     const pw = passwordInput?.value || void 0;
     onJoin({
       token,
       username,
       colors: {
-        skin: skinColor.value,
-        shirt: shirtColor.value,
-        pants: pantsColor.value
+        skin: colors.skin,
+        shirt: colors.shirt,
+        pants: colors.pants
       },
       password: pw
     });
@@ -5107,7 +5775,14 @@ function setupCanvasTouch(input2, state2, conn2) {
 // client/src/ui/ServerBrowser.ts
 var onSelect = null;
 var refreshInterval = null;
-function setupServerBrowser(onServerSelected) {
+var preGameNavRef = null;
+var PAGE_SIZE = 6;
+var currentPage = 0;
+var searchQuery = "";
+var allServers = [];
+var clientPings = /* @__PURE__ */ new Map();
+function setupServerBrowser(onServerSelected, preGameNav2) {
+  preGameNavRef = preGameNav2 ?? null;
   onSelect = onServerSelected;
   const playBtn = document.getElementById("play-main-btn");
   const directBtn = document.getElementById("direct-connect-btn");
@@ -5133,6 +5808,27 @@ function setupServerBrowser(onServerSelected) {
   if (refreshBtn) {
     refreshBtn.addEventListener("click", fetchServers);
   }
+  const searchInput = document.getElementById("server-search");
+  if (searchInput) {
+    searchInput.addEventListener("input", () => {
+      searchQuery = searchInput.value.trim().toLowerCase();
+      currentPage = 0;
+      renderServerList(allServers);
+    });
+  }
+  document.getElementById("servers-prev")?.addEventListener("click", () => {
+    if (currentPage > 0) {
+      currentPage--;
+      renderServerList(allServers);
+    }
+  });
+  document.getElementById("servers-next")?.addEventListener("click", () => {
+    const filtered = getFilteredServers(allServers);
+    if ((currentPage + 1) * PAGE_SIZE < filtered.length) {
+      currentPage++;
+      renderServerList(allServers);
+    }
+  });
   fetchServers();
   refreshInterval = setInterval(fetchServers, 1e4);
 }
@@ -5147,7 +5843,9 @@ async function fetchServers() {
     const res = await fetch(url);
     if (!res.ok) return;
     const servers = await res.json();
+    allServers = servers;
     renderServerList(servers);
+    pingAllServers(servers);
   } catch {
   } finally {
     if (refreshBtn) {
@@ -5155,19 +5853,63 @@ async function fetchServers() {
     }
   }
 }
+function pingAllServers(servers) {
+  for (const server of servers) {
+    if (isMainServer(server)) continue;
+    const key = `${server.host}:${server.port}`;
+    pingServer(server.host, server.port).then((ms) => {
+      clientPings.set(key, ms);
+      renderServerList(allServers);
+    });
+  }
+}
+function pingServer(host, port) {
+  return new Promise((resolve) => {
+    const start = performance.now();
+    const ws = new WebSocket(`ws://${host}:${port}`);
+    const timer = setTimeout(() => {
+      ws.close();
+      resolve(-1);
+    }, 3e3);
+    ws.addEventListener("open", () => {
+      clearTimeout(timer);
+      const ms = Math.round(performance.now() - start);
+      ws.close();
+      resolve(ms);
+    });
+    ws.addEventListener("error", () => {
+      clearTimeout(timer);
+      ws.close();
+      resolve(-1);
+    });
+  });
+}
 function openCommunityServer(url) {
   window.location.href = url;
 }
 function isMainServer(server) {
   return server.host === window.location.hostname || server.host === "localhost" || server.host === "127.0.0.1" || server.name.includes("Official");
 }
+function getFilteredServers(servers) {
+  if (!searchQuery) return servers;
+  return servers.filter(
+    (s) => s.name.toLowerCase().includes(searchQuery) || s.description.toLowerCase().includes(searchQuery)
+  );
+}
 function renderServerList(servers) {
   const tbody = document.getElementById("server-rows");
   if (!tbody) return;
   tbody.textContent = "";
-  for (const server of servers) {
+  const filtered = getFilteredServers(servers);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  if (currentPage >= totalPages) currentPage = totalPages - 1;
+  const start = currentPage * PAGE_SIZE;
+  const page = filtered.slice(start, start + PAGE_SIZE);
+  for (const server of page) {
     const row = document.createElement("tr");
     row.className = "server-row";
+    row.setAttribute("tabindex", "0");
+    row.setAttribute("role", "button");
     if (server.host === window.location.hostname) {
       row.classList.add("server-main");
     }
@@ -5195,7 +5937,20 @@ function renderServerList(servers) {
     if (isMainServer(server)) {
       pingCell.textContent = "\u2014";
     } else {
-      pingCell.textContent = server.ping != null ? `${server.ping}ms` : "\u2014";
+      const key = `${server.host}:${server.port}`;
+      const ping = clientPings.get(key);
+      if (ping === void 0) {
+        pingCell.textContent = "...";
+        pingCell.style.color = "#666";
+      } else if (ping < 0) {
+        pingCell.textContent = "\u2715";
+        pingCell.style.color = "#a44";
+      } else {
+        pingCell.textContent = `${ping}ms`;
+        if (ping < 80) pingCell.style.color = "#7ec87e";
+        else if (ping < 150) pingCell.style.color = "#c9a84c";
+        else pingCell.style.color = "#c44";
+      }
     }
     row.appendChild(pingCell);
     const descCell = document.createElement("td");
@@ -5210,7 +5965,106 @@ function renderServerList(servers) {
     });
     tbody.appendChild(row);
   }
+  const pageInfo = document.getElementById("servers-page-info");
+  const prevBtn = document.getElementById("servers-prev");
+  const nextBtn = document.getElementById("servers-next");
+  const pagination = document.getElementById("servers-pagination");
+  if (pagination) {
+    pagination.style.display = filtered.length > PAGE_SIZE ? "flex" : "none";
+  }
+  if (pageInfo) {
+    pageInfo.textContent = `${currentPage + 1} / ${totalPages}`;
+  }
+  if (prevBtn) {
+    prevBtn.disabled = currentPage === 0;
+  }
+  if (nextBtn) {
+    nextBtn.disabled = (currentPage + 1) * PAGE_SIZE >= filtered.length;
+  }
+  if (preGameNavRef) {
+    preGameNavRef.rescan();
+  }
 }
+
+// client/src/ui/PreGameNav.ts
+var PreGameNav = class {
+  gamepad;
+  menuNav;
+  animFrameId = 0;
+  active = false;
+  constructor() {
+    this.gamepad = new GamepadController();
+    this.menuNav = new GamepadMenuNav();
+    this.gamepad.enabled = localStorage.getItem("plainscape_gamepad_enabled") !== "false";
+    this.startPolling();
+  }
+  /** Activate menu navigation on a container */
+  activate(container, onClose) {
+    this.active = true;
+    this.menuNav.activate(container, onClose ?? (() => {
+    }));
+  }
+  /** Deactivate navigation (when transitioning screens) */
+  deactivate() {
+    this.active = false;
+    this.menuNav.deactivate();
+  }
+  /** Stop the polling loop entirely (when game starts) */
+  destroy() {
+    this.deactivate();
+    if (this.animFrameId) {
+      cancelAnimationFrame(this.animFrameId);
+      this.animFrameId = 0;
+    }
+  }
+  /** Restart the polling loop (e.g. after logout back to lobby) */
+  restart() {
+    if (this.animFrameId) return;
+    this.gamepad.enabled = localStorage.getItem("plainscape_gamepad_enabled") !== "false";
+    this.startPolling();
+  }
+  /** Rescan focusable elements (call after DOM updates like server list refresh) */
+  rescan() {
+    if (this.active) {
+      this.menuNav.rescan();
+    }
+  }
+  startPolling() {
+    const poll = () => {
+      this.animFrameId = requestAnimationFrame(poll);
+      if (!this.gamepad.enabled) return;
+      if (!this.active) return;
+      const prevHandler = this.gamepad.onAction;
+      this.gamepad.onAction = (action) => this.handleAction(action);
+      this.gamepad.poll();
+      this.gamepad.onAction = prevHandler;
+      this.menuNav.handleStick(this.gamepad.moveDy);
+    };
+    this.animFrameId = requestAnimationFrame(poll);
+  }
+  handleAction(action) {
+    switch (action) {
+      case "interact":
+        this.menuNav.handleAction("interact");
+        break;
+      case "dash":
+        this.menuNav.handleAction("dash");
+        break;
+      case "build_wall":
+        this.menuNav.handleDpad("up");
+        break;
+      case "build_turret":
+        this.menuNav.handleDpad("down");
+        break;
+      case "build_bed":
+        this.menuNav.handleDpad("left");
+        break;
+      case "build_gate":
+        this.menuNav.handleDpad("right");
+        break;
+    }
+  }
+};
 
 // client/src/main.ts
 var state = new GameState();
@@ -5218,6 +6072,7 @@ var renderer;
 var input;
 var conn;
 var running = false;
+var preGameNav = new PreGameNav();
 function generateFingerprint() {
   try {
     const canvas = document.createElement("canvas");
@@ -5499,7 +6354,8 @@ function startGameLoop() {
   if (running) return;
   running = true;
   const canvas = document.getElementById("game-canvas");
-  input = new InputHandler(canvas, conn);
+  preGameNav.destroy();
+  input = new InputHandler(canvas, conn, preGameNav.gamepad);
   renderer = new Renderer(canvas, state, input);
   initWinnerModal(input);
   setupChat(conn, input);
@@ -5674,6 +6530,9 @@ function startGameLoop() {
     if (escMenu) escMenu.style.display = "none";
     if (playBtn) playBtn.disabled = false;
     input.menuOpen = false;
+    preGameNav.restart();
+    const joinForm = document.querySelector("#join-screen .join-form");
+    if (joinForm) preGameNav.activate(joinForm);
   };
   const partyBtn = document.getElementById("party-btn");
   const partyModal = document.getElementById("party-modal");
@@ -5779,7 +6638,7 @@ function setupControllerConfig(inputHandler) {
   if (inputHandler.isMobile) {
     touchToggleLabel.style.display = "";
   }
-  enabledCheckbox.checked = localStorage.getItem("plainscape_gamepad_enabled") === "true";
+  enabledCheckbox.checked = localStorage.getItem("plainscape_gamepad_enabled") !== "false";
   hideTouchCheckbox.checked = localStorage.getItem("plainscape_hide_touch") === "true";
   gp.enabled = enabledCheckbox.checked;
   if (inputHandler.touch) {
@@ -5976,9 +6835,13 @@ function startLobbyFlow(serverUrl) {
     if (isMainServer2) {
       backBtn.textContent = "Server Browser";
       backBtn.onclick = () => {
+        preGameNav.deactivate();
         if (joinScreen) joinScreen.style.display = "none";
         const browserEl = document.getElementById("server-browser");
-        if (browserEl) browserEl.style.display = "flex";
+        if (browserEl) {
+          browserEl.style.display = "flex";
+          preGameNav.activate(browserEl);
+        }
       };
     } else {
       backBtn.textContent = "Browse Servers";
@@ -5988,6 +6851,7 @@ function startLobbyFlow(serverUrl) {
     }
   }
   setupLobby(async (data) => {
+    preGameNav.deactivate();
     try {
       await conn.connect();
       state.selfColors = data.colors;
@@ -6003,7 +6867,11 @@ function startLobbyFlow(serverUrl) {
     } catch (err) {
       showError("Failed to connect to server");
     }
-  }, serverUrl);
+  }, serverUrl, preGameNav.menuNav);
+  const joinForm = document.querySelector("#join-screen .join-form");
+  if (joinForm) {
+    preGameNav.activate(joinForm);
+  }
 }
 if (isMainServer2) {
   const joinScreen = document.getElementById("join-screen");
@@ -6013,8 +6881,10 @@ if (isMainServer2) {
     browserEl.style.display = "flex";
     setupServerBrowser((serverUrl) => {
       browserEl.style.display = "none";
+      preGameNav.deactivate();
       startLobbyFlow(serverUrl ?? void 0);
-    });
+    }, preGameNav);
+    preGameNav.activate(browserEl);
   } else {
     startLobbyFlow();
   }

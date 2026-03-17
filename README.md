@@ -1,6 +1,6 @@
 # PlainScape Community Server
 
-**PlainScape** is a real-time multiplayer top-down survival game that runs in your browser. Players explore an infinite world, fight AI enemies, build defenses, and compete for the daily champion title — where the winner gets to add a new rule to the game using AI.
+**PlainScape** is a real-time multiplayer top-down survival game that runs in your browser. Players fight AI enemies, build defenses, and compete for the daily champion title — where the winner gets to add a new rule to the game using AI.
 
 This package lets you host your own PlainScape server for friends, communities, or LAN parties.
 
@@ -244,6 +244,30 @@ If you have `ANTHROPIC_API_KEY` set, the daily champion system works like this:
 5. The rule stays active until the weekly reset
 
 Players can suggest rules at the Scribe NPC (200 Source) and vote on others' suggestions (50 Source).
+
+### How the AI Rule System Works
+
+The rule system is a two-stage pipeline that turns player ideas into running game code:
+
+**Stage 1 — Rule Refinement** (`ClaudeService`): The player's raw input is sent to Claude Haiku, which shapes it into a clear, concise game rule. A set of guardrails prevents rules that would break the game — no removing the safe zone, no disabling Source earning, no crashing the server, etc. Server admins can add additional guardrails via the `claude-rules.md` file (editable from the admin console).
+
+**Stage 2 — Code Implementation** (`RuleImplementer`): The refined rule text is handed to Claude Opus, which has full agentic access to the codebase via tool use. It can read files, write new files, make surgical edits, and run build commands. The system works like this:
+
+1. **Planning** (turns 1-3) — The AI reads `RULE_GUIDE.md` (a pre-written API reference with templates, patterns, and insertion points) and 1-2 key source files, then writes a brief implementation plan
+2. **Implementation** (turns 4+) — The AI creates new system files and wires them into the game loop, following the patterns in the guide. It uses `edit_file` for surgical modifications to existing files (like adding imports or inserting into the tick loop) and `write_file` for new files
+3. **Build & verify** — The AI runs esbuild to compile and fixes any errors
+4. **Deploy** — If the build passes, changes are committed and pushed to git, triggering a redeploy
+
+Key efficiency features:
+- **Read caching** — File reads are cached within a session so the AI never reads the same file twice
+- **Hard read limit** — After 6 consecutive read-only turns, further reads are refused to force the AI to start writing
+- **Pre-digested insertion points** — The system prompt includes exact code patterns and line numbers for commonly modified files (World.ts, MovementSystem.ts, HudRenderer.ts), so the AI often doesn't need to read them at all
+- **Model routing** — Read-only exploration turns use Claude Haiku (cheaper, separate rate limit pool), while implementation turns use Claude Opus
+- **Rollback on failure** — If the build fails or the push fails, all file changes are reverted to their original state
+- **Shell command blocking** — The AI is prevented from using `cat`, `grep`, `sed`, etc. via shell, forcing it through the proper tool interface with caching and security checks
+- **Prompt caching** — System prompt and recent messages use Anthropic's prompt caching to reduce token costs across turns
+
+The entire process typically completes in 8-15 API turns. Server admins can tune `CLAUDE_MAX_TURNS` (default 50) and `CLAUDE_MAX_TOKENS` (default 16384) in their `.env`.
 
 ### Weekly Reset
 

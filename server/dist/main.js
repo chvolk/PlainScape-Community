@@ -65,7 +65,7 @@ var SAFE_ZONE_HEAL_AMOUNT = 1;
 var ARROW_DAMAGE = 2;
 var ARROW_SPEED = 240;
 var ARROW_COOLDOWN = 1e3;
-var ARROW_TTL = 1800;
+var ARROW_TTL = 1e3;
 var LION_HP = 6;
 var LION_SPEED = 100;
 var LION_DAMAGE = 1;
@@ -106,7 +106,7 @@ var GHOST_BURST_INTERVAL = 150;
 var GHOST_PHASE_DURATION = 2e3;
 var GHOST_PHASE_COOLDOWN_MIN = 4e3;
 var GHOST_PHASE_COOLDOWN_MAX = 7e3;
-var STAG_HP = 120;
+var STAG_HP = 300;
 var STAG_SPEED = 90;
 var STAG_MELEE_DAMAGE = 2;
 var STAG_FIRE_BREATH_DAMAGE = 4;
@@ -121,8 +121,9 @@ var STAG_CHARGE_DAMAGE = 5;
 var STAG_CHARGE_COOLDOWN = 5e3;
 var STAG_CHARGE_RANGE = 250;
 var STAG_CHARGE_DURATION = 800;
-var STAG_SPAWN_X = 1200;
-var STAG_SPAWN_Y = 1200;
+var STAG_CHARGE_AOE_RADIUS = 80;
+var STAG_CHARGE_AOE_DAMAGE = 3;
+var STAG_FIRE_BREATH_SPEED = 260;
 var TURRET_PROJECTILE_SPEED = 200;
 var TURRET_FIRE_RATE = 2500;
 var TURRET_RANGE = 300;
@@ -151,7 +152,6 @@ var SOURCE_DEATH_AMOUNT = 3;
 var SOURCE_LION_KILL_AMOUNT = 7;
 var SOURCE_GHOST_KILL_AMOUNT = 7;
 var SOURCE_TRANSITION_BONUS = 2;
-var SOURCE_STAG_KILL_AMOUNT = 400;
 var SOURCE_PLAYER_KILL_AMOUNT = 20;
 var SOURCE_BUILDING_DESTROY = 5;
 var BED_HEAL_RADIUS = 80;
@@ -165,8 +165,8 @@ var SCRIBE_NPC_RANGE = 80;
 var BANKER_POS = { x: 120, y: -60 };
 var SCRIBE_POS = { x: -120, y: -60 };
 var SPAWN_CHECK_INTERVAL = 3e3;
-var SPAWN_PER_PLAYER_BASE = 1.5;
-var SPAWN_DISTANCE_SCALE = 5e-4;
+var SPAWN_PER_PLAYER_BASE = 2.5;
+var SPAWN_DISTANCE_SCALE = 3e-4;
 var MAX_ENEMIES = 300;
 var MAX_LIONS_NEAR_PLAYER = 8;
 var MAX_GHOSTS_NEAR_PLAYER = 8;
@@ -395,10 +395,10 @@ var ChunkManager = class {
 };
 
 // server/src/world/DayNightCycle.ts
-var CYCLE_MS = 90 * 60 * 1e3;
-var DAWN_END = 15 * 60 * 1e3;
-var DAY_END = 45 * 60 * 1e3;
-var DUSK_END = 60 * 60 * 1e3;
+var CYCLE_MS = 60 * 60 * 1e3;
+var DAWN_END = 10 * 60 * 1e3;
+var DAY_END = 30 * 60 * 1e3;
+var DUSK_END = 40 * 60 * 1e3;
 var phaseOverride = null;
 function setPhaseOverride(phase) {
   phaseOverride = phase;
@@ -680,6 +680,100 @@ var Projectile = class extends Entity {
   }
 };
 
+// server/src/entities/Enemy.ts
+var Enemy = class extends Entity {
+  hp;
+  maxHp;
+  speed;
+  damage;
+  attackRange;
+  attackCooldown;
+  aggroRange;
+  aiState = "idle";
+  targetId = null;
+  aggroTargetId = null;
+  lastAttackTime = 0;
+  // Wander anchor
+  spawnX;
+  spawnY;
+  // Bonus damage from specific attack types
+  meleeBonusDamage = 0;
+  rangedBonusDamage = 0;
+  // Stun (from lunge hits)
+  stunUntil = 0;
+  // Building attack cooldown (separate from combat)
+  lastBuildingAttack = 0;
+  // Active wandering
+  wanderAngle = Math.random() * Math.PI * 2;
+  wanderNextChange = 0;
+  constructor(kind, x, y, hp, speed, damage, attackRange, attackCooldown, aggroRange) {
+    super(kind, x, y);
+    this.hp = hp;
+    this.maxHp = hp;
+    this.speed = speed;
+    this.damage = damage;
+    this.attackRange = attackRange;
+    this.attackCooldown = attackCooldown;
+    this.aggroRange = aggroRange;
+    this.spawnX = x;
+    this.spawnY = y;
+  }
+  /** Whether this enemy is currently intangible (takes no damage) */
+  get intangible() {
+    return false;
+  }
+  toSnap() {
+    let anim;
+    if (this.aiState === "chase" || this.aiState === "flee") anim = "walk";
+    else if (this.aiState === "attack") anim = "punch";
+    return {
+      id: this.id,
+      kind: this.kind,
+      x: this.x,
+      y: this.y,
+      hp: this.hp,
+      maxHp: this.maxHp,
+      facing: this.facing,
+      anim
+    };
+  }
+};
+
+// server/src/entities/ScorchedStag.ts
+var ScorchedStag = class extends Enemy {
+  lastFireBreathTime = 0;
+  lastChargeTime = 0;
+  lastMeleeTime = 0;
+  charging = false;
+  chargeStartTime = 0;
+  chargeTargetX = 0;
+  chargeTargetY = 0;
+  chaseRampStart = 0;
+  /** Tracks damage dealt by each player: token → { username, damage } */
+  damageLog = /* @__PURE__ */ new Map();
+  logDamage(token, username, amount) {
+    const entry = this.damageLog.get(token);
+    if (entry) {
+      entry.damage += amount;
+    } else {
+      this.damageLog.set(token, { username, damage: amount });
+    }
+  }
+  constructor(x, y) {
+    super(
+      "stag",
+      x,
+      y,
+      STAG_HP,
+      STAG_SPEED,
+      STAG_MELEE_DAMAGE,
+      STAG_MELEE_RANGE,
+      STAG_MELEE_COOLDOWN,
+      STAG_AGGRO_RANGE
+    );
+  }
+};
+
 // server/src/systems/PartySystem.ts
 var nextPartyId = 1;
 var parties = /* @__PURE__ */ new Map();
@@ -906,6 +1000,49 @@ function tickRespawns(world2) {
   }
 }
 
+// server/src/systems/StagRewards.ts
+function handleStagDeath(world2, stag) {
+  const totalPool = STAG_HP;
+  const damageLog = stag.damageLog;
+  if (damageLog.size === 0) return;
+  let totalDamage = 0;
+  for (const entry of damageLog.values()) {
+    totalDamage += entry.damage;
+  }
+  if (totalDamage <= 0) return;
+  const heroes = [];
+  for (const [token, entry] of damageLog) {
+    const proportion = entry.damage / totalDamage;
+    const reward = Math.max(1, Math.round(proportion * totalPool));
+    heroes.push({ username: entry.username, damage: entry.damage, reward });
+    const onlinePlayer = findPlayerByToken(world2, token);
+    if (onlinePlayer) {
+      awardSource(onlinePlayer, reward, world2);
+      world2.sendEvent(onlinePlayer, "kill", `The Scorched Stag has fallen! +${reward} Source`);
+    } else {
+      world2.db.addTotalSource(token, reward);
+    }
+  }
+  heroes.sort((a, b) => b.damage - a.damage);
+  const lines = ["Heroes have slain the Stag!"];
+  for (const hero of heroes) {
+    lines.push(`${hero.username}: ${hero.damage} dmg (+${hero.reward} Source)`);
+  }
+  world2.db.addNotice(lines.join("\n"));
+  world2.broadcastAll({
+    type: "event",
+    kind: "boss",
+    message: "The Scorched Stag has been slain!"
+  });
+  world2.refreshSignData?.();
+}
+function findPlayerByToken(world2, token) {
+  for (const [, player] of world2.players) {
+    if (player.token === token) return player;
+  }
+  return null;
+}
+
 // server/src/systems/CombatSystem.ts
 function tickCombat(world2) {
   const now = Date.now();
@@ -1048,6 +1185,9 @@ function performConeAttack(world2, attacker, facing, damage, range) {
     const totalDamage = damage + enemy.meleeBonusDamage;
     enemy.hp -= totalDamage;
     enemy.aggroTargetId = attacker.id;
+    if (enemy instanceof ScorchedStag) {
+      enemy.logDamage(attacker.token, attacker.username, totalDamage);
+    }
     const kbAngle = Math.atan2(enemy.y - attacker.y, enemy.x - attacker.x);
     enemy.x += Math.cos(kbAngle) * knockbackDist;
     enemy.y += Math.sin(kbAngle) * knockbackDist;
@@ -1059,18 +1199,20 @@ function performConeAttack(world2, attacker, facing, damage, range) {
         kind: "destroy",
         message: `__fx_explode_${Math.round(enemy.x)}_${Math.round(enemy.y)}_${enemy.kind}__`
       });
-      const phase = getDayPhase();
-      let killReward = SOURCE_GHOST_KILL_AMOUNT;
-      if (enemy.kind === "lion") {
-        killReward = SOURCE_LION_KILL_AMOUNT;
-        if (phase === "dawn") killReward += SOURCE_TRANSITION_BONUS;
-      } else if (enemy.kind === "ghost") {
-        if (phase === "dusk") killReward += SOURCE_TRANSITION_BONUS;
-      } else if (enemy.kind === "stag") {
-        killReward = SOURCE_STAG_KILL_AMOUNT;
+      if (enemy instanceof ScorchedStag) {
+        handleStagDeath(world2, enemy);
+      } else {
+        const phase = getDayPhase();
+        let killReward = SOURCE_GHOST_KILL_AMOUNT;
+        if (enemy.kind === "lion") {
+          killReward = SOURCE_LION_KILL_AMOUNT;
+          if (phase === "dawn") killReward += SOURCE_TRANSITION_BONUS;
+        } else if (enemy.kind === "ghost") {
+          if (phase === "dusk") killReward += SOURCE_TRANSITION_BONUS;
+        }
+        awardSource(attacker, killReward, world2);
+        world2.sendEvent(attacker, "kill", `You killed a ${enemy.kind}! +${killReward} Source`);
       }
-      awardSource(attacker, killReward, world2);
-      world2.sendEvent(attacker, "kill", `You killed a ${enemy.kind}! +${killReward} Source`);
     }
   }
   for (const other of nearby.players) {
@@ -1157,6 +1299,9 @@ function performLunge(world2, player, facing) {
     enemy.hp -= totalDamage;
     enemy.stunUntil = now + LUNGE_STUN_DURATION;
     enemy.aggroTargetId = player.id;
+    if (enemy instanceof ScorchedStag) {
+      enemy.logDamage(player.token, player.username, totalDamage);
+    }
     if (enemy.hp <= 0) {
       enemy.markedForRemoval = true;
       world2.suppressSpawnsAt(enemy.x, enemy.y);
@@ -1165,18 +1310,20 @@ function performLunge(world2, player, facing) {
         kind: "destroy",
         message: `__fx_explode_${Math.round(enemy.x)}_${Math.round(enemy.y)}_${enemy.kind}__`
       });
-      const lungePhase = getDayPhase();
-      let lungeKillReward = SOURCE_GHOST_KILL_AMOUNT;
-      if (enemy.kind === "lion") {
-        lungeKillReward = SOURCE_LION_KILL_AMOUNT;
-        if (lungePhase === "dawn") lungeKillReward += SOURCE_TRANSITION_BONUS;
-      } else if (enemy.kind === "ghost") {
-        if (lungePhase === "dusk") lungeKillReward += SOURCE_TRANSITION_BONUS;
-      } else if (enemy.kind === "stag") {
-        lungeKillReward = SOURCE_STAG_KILL_AMOUNT;
+      if (enemy instanceof ScorchedStag) {
+        handleStagDeath(world2, enemy);
+      } else {
+        const lungePhase = getDayPhase();
+        let lungeKillReward = SOURCE_GHOST_KILL_AMOUNT;
+        if (enemy.kind === "lion") {
+          lungeKillReward = SOURCE_LION_KILL_AMOUNT;
+          if (lungePhase === "dawn") lungeKillReward += SOURCE_TRANSITION_BONUS;
+        } else if (enemy.kind === "ghost") {
+          if (lungePhase === "dusk") lungeKillReward += SOURCE_TRANSITION_BONUS;
+        }
+        awardSource(player, lungeKillReward, world2);
+        world2.sendEvent(player, "kill", `You killed a ${enemy.kind}! +${lungeKillReward} Source`);
       }
-      awardSource(player, lungeKillReward, world2);
-      world2.sendEvent(player, "kill", `You killed a ${enemy.kind}! +${lungeKillReward} Source`);
     }
   }
   for (const other of nearby.players) {
@@ -1223,6 +1370,10 @@ function applyEnemyHit(world2, proj, enemy) {
   const damage = proj.damage + enemy.rangedBonusDamage;
   enemy.hp -= damage;
   enemy.aggroTargetId = proj.ownerId;
+  if (enemy instanceof ScorchedStag && proj.ownerType === "player") {
+    const owner = world2.players.get(proj.ownerId);
+    if (owner) enemy.logDamage(owner.token, owner.username, damage);
+  }
   if (enemy.hp <= 0) {
     enemy.markedForRemoval = true;
     world2.suppressSpawnsAt(enemy.x, enemy.y);
@@ -1231,7 +1382,9 @@ function applyEnemyHit(world2, proj, enemy) {
       kind: "destroy",
       message: `__fx_explode_${Math.round(enemy.x)}_${Math.round(enemy.y)}_${enemy.kind}__`
     });
-    if (proj.ownerType === "player") {
+    if (enemy instanceof ScorchedStag) {
+      handleStagDeath(world2, enemy);
+    } else if (proj.ownerType === "player") {
       const owner = world2.players.get(proj.ownerId);
       if (owner) {
         const phase = getDayPhase();
@@ -1241,8 +1394,6 @@ function applyEnemyHit(world2, proj, enemy) {
           if (phase === "dawn") reward += SOURCE_TRANSITION_BONUS;
         } else if (enemy.kind === "ghost") {
           if (phase === "dusk") reward += SOURCE_TRANSITION_BONUS;
-        } else if (enemy.kind === "stag") {
-          reward = SOURCE_STAG_KILL_AMOUNT;
         }
         awardSource(owner, reward, world2);
         world2.sendEvent(owner, "kill", `You killed a ${enemy.kind}! +${reward} Source`);
@@ -1435,65 +1586,6 @@ function broadcastTurretExplosion(world2, proj) {
   });
 }
 
-// server/src/entities/Enemy.ts
-var Enemy = class extends Entity {
-  hp;
-  maxHp;
-  speed;
-  damage;
-  attackRange;
-  attackCooldown;
-  aggroRange;
-  aiState = "idle";
-  targetId = null;
-  aggroTargetId = null;
-  lastAttackTime = 0;
-  // Wander anchor
-  spawnX;
-  spawnY;
-  // Bonus damage from specific attack types
-  meleeBonusDamage = 0;
-  rangedBonusDamage = 0;
-  // Stun (from lunge hits)
-  stunUntil = 0;
-  // Building attack cooldown (separate from combat)
-  lastBuildingAttack = 0;
-  // Active wandering
-  wanderAngle = Math.random() * Math.PI * 2;
-  wanderNextChange = 0;
-  constructor(kind, x, y, hp, speed, damage, attackRange, attackCooldown, aggroRange) {
-    super(kind, x, y);
-    this.hp = hp;
-    this.maxHp = hp;
-    this.speed = speed;
-    this.damage = damage;
-    this.attackRange = attackRange;
-    this.attackCooldown = attackCooldown;
-    this.aggroRange = aggroRange;
-    this.spawnX = x;
-    this.spawnY = y;
-  }
-  /** Whether this enemy is currently intangible (takes no damage) */
-  get intangible() {
-    return false;
-  }
-  toSnap() {
-    let anim;
-    if (this.aiState === "chase" || this.aiState === "flee") anim = "walk";
-    else if (this.aiState === "attack") anim = "punch";
-    return {
-      id: this.id,
-      kind: this.kind,
-      x: this.x,
-      y: this.y,
-      hp: this.hp,
-      maxHp: this.maxHp,
-      facing: this.facing,
-      anim
-    };
-  }
-};
-
 // server/src/entities/Lion.ts
 var Lion = class extends Enemy {
   chaseStartTime = 0;
@@ -1583,30 +1675,6 @@ var Ghost = class extends Enemy {
       snap.anim = "shield";
     }
     return snap;
-  }
-};
-
-// server/src/entities/ScorchedStag.ts
-var ScorchedStag = class extends Enemy {
-  lastFireBreathTime = 0;
-  lastChargeTime = 0;
-  lastMeleeTime = 0;
-  charging = false;
-  chargeStartTime = 0;
-  chargeTargetX = 0;
-  chargeTargetY = 0;
-  constructor(x, y) {
-    super(
-      "stag",
-      x,
-      y,
-      STAG_HP,
-      STAG_SPEED,
-      STAG_MELEE_DAMAGE,
-      STAG_MELEE_RANGE,
-      STAG_MELEE_COOLDOWN,
-      STAG_AGGRO_RANGE
-    );
   }
 };
 
@@ -1763,9 +1831,34 @@ function tickLion(world2, lion, target, dist, delta) {
         const moveAmount = Math.min(leapSpeed * delta, distToTarget);
         const nx = dx / distToTarget;
         const ny = dy / distToTarget;
-        lion.x += nx * moveAmount;
-        lion.y += ny * moveAmount;
         lion.facing = Math.atan2(dy, dx);
+        const stepSize = CELL_SIZE * 0.5;
+        const steps = Math.max(1, Math.ceil(moveAmount / stepSize));
+        const perStep = moveAmount / steps;
+        let hitBuilding = false;
+        for (let i = 0; i < steps; i++) {
+          const nextX = lion.x + nx * perStep;
+          const nextY = lion.y + ny * perStep;
+          const cellX = Math.floor(nextX / CELL_SIZE);
+          const cellY = Math.floor(nextY / CELL_SIZE);
+          const building = world2.chunks.getBuildingAtCell(cellX, cellY);
+          if (building && building.isSolid()) {
+            building.hp -= lion.damage;
+            if (building.hp <= 0) {
+              world2.removeBuilding(building);
+            }
+            lion.pouncing = false;
+            lion.pounceLandTime = now;
+            lion.crouchUntil = now + LION_RECOVERY_DURATION;
+            lion.speed = 0;
+            lion.aiState = "attack";
+            hitBuilding = true;
+            break;
+          }
+          lion.x = nextX;
+          lion.y = nextY;
+        }
+        if (hitBuilding) return;
       } else {
         lion.pouncePhase = "swipe";
         lion.pounceStartTime = now;
@@ -2029,28 +2122,49 @@ function fireGhostProjectile(world2, ghost, target) {
 }
 
 // server/src/systems/ai/StagAI.ts
+var STAG_RAMP_DURATION = 3e3;
+var STAG_MAX_SPEED_MULT = 1;
+var STAG_POST_CHARGE_MELEE_COOLDOWN = 2e3;
 function tickStag(world2, stag, target, dist, delta) {
   const now = Date.now();
   if (stag.charging) {
     const elapsed = now - stag.chargeStartTime;
     if (elapsed >= STAG_CHARGE_DURATION) {
       stag.charging = false;
+      stag.chaseRampStart = now;
       stag.speed = STAG_SPEED;
-      const nearby = world2.chunks.getEntitiesInRadius(stag.x, stag.y, STAG_MELEE_RANGE + 20);
+      const nearby = world2.chunks.getEntitiesInRadius(stag.x, stag.y, STAG_CHARGE_AOE_RADIUS);
       for (const player of nearby.players) {
         if (player.dead || player.shieldActive) continue;
         const pDist = Math.hypot(player.x - stag.x, player.y - stag.y);
         if (pDist <= STAG_MELEE_RANGE + 20) {
           player.hp -= STAG_CHARGE_DAMAGE;
           if (player.hp <= 0) killPlayer(world2, player);
+        } else if (pDist <= STAG_CHARGE_AOE_RADIUS) {
+          player.hp -= STAG_CHARGE_AOE_DAMAGE;
+          if (player.hp <= 0) killPlayer(world2, player);
         }
       }
       stag.lastAttackTime = now;
+      stag.lastMeleeTime = now + STAG_POST_CHARGE_MELEE_COOLDOWN - STAG_MELEE_COOLDOWN;
       return;
     }
     stag.speed = STAG_CHARGE_SPEED;
     moveEnemy(stag, stag.chargeTargetX, stag.chargeTargetY, world2.chunks, delta);
     stag.aiState = "attack";
+    if (now >= stag.lastAttackTime + 300) {
+      const hitRange = STAG_MELEE_RANGE + 10;
+      const nearby = world2.chunks.getEntitiesInRadius(stag.x, stag.y, hitRange);
+      for (const player of nearby.players) {
+        if (player.dead || player.shieldActive) continue;
+        const pDist = Math.hypot(player.x - stag.x, player.y - stag.y);
+        if (pDist <= hitRange) {
+          player.hp -= STAG_CHARGE_DAMAGE;
+          if (player.hp <= 0) killPlayer(world2, player);
+          stag.lastAttackTime = now;
+        }
+      }
+    }
     return;
   }
   if (dist >= STAG_MELEE_RANGE && dist <= STAG_CHARGE_RANGE && now >= stag.lastChargeTime + STAG_CHARGE_COOLDOWN && now >= stag.lastAttackTime + 1e3) {
@@ -2067,7 +2181,7 @@ function tickStag(world2, stag, target, dist, delta) {
     const dx = target.x - stag.x;
     const dy = target.y - stag.y;
     const baseAngle = Math.atan2(dy, dx);
-    const speed = 180;
+    const speed = STAG_FIRE_BREATH_SPEED;
     for (let i = -1; i <= 1; i++) {
       const angle = baseAngle + i * 0.15;
       const vx = Math.cos(angle) * speed;
@@ -2083,6 +2197,12 @@ function tickStag(world2, stag, target, dist, delta) {
   }
   if (dist > STAG_MELEE_RANGE + 10) {
     stag.aiState = "chase";
+    if (stag.chaseRampStart > 0) {
+      const rampElapsed = now - stag.chaseRampStart;
+      const rampT = Math.min(1, rampElapsed / STAG_RAMP_DURATION);
+      const maxSpeed = PLAYER_SPEED * STAG_MAX_SPEED_MULT;
+      stag.speed = STAG_SPEED + (maxSpeed - STAG_SPEED) * rampT;
+    }
     const prevX = stag.x;
     const prevY = stag.y;
     moveEnemy(stag, target.x, target.y, world2.chunks, delta);
@@ -2108,7 +2228,7 @@ function tickAI(world2, delta, doSeparation = true) {
   for (const [, enemy] of world2.enemies) {
     if (enemy.markedForRemoval) continue;
     if (Date.now() < enemy.stunUntil) continue;
-    if (Math.hypot(enemy.x, enemy.y) < SAFE_ZONE_RADIUS) {
+    if (enemy.kind !== "stag" && Math.hypot(enemy.x, enemy.y) < SAFE_ZONE_RADIUS) {
       enemy.markedForRemoval = true;
       world2.broadcastAll({
         type: "event",
@@ -2117,7 +2237,16 @@ function tickAI(world2, delta, doSeparation = true) {
       });
       continue;
     }
-    const target = findNearestPlayer(world2, enemy);
+    let target;
+    if (enemy instanceof ScorchedStag) {
+      enemy.aggroTargetId = null;
+      target = findNearestPlayer(world2, enemy);
+      if (target && Math.hypot(target.x, target.y) < SAFE_ZONE_RADIUS) {
+        target = null;
+      }
+    } else {
+      target = findNearestPlayer(world2, enemy);
+    }
     if (!target) {
       wander(enemy, delta, world2);
       enemy.aiState = "idle";
@@ -2325,13 +2454,9 @@ function tickSpawning(world2) {
       world2.bossSpawned = true;
     } else {
       const target = getRandomOutdoorPlayer(world2);
-      let stag;
-      if (target) {
-        const pos = getBossSpawnNearPlayer(target);
-        stag = new ScorchedStag(pos.x, pos.y);
-      } else {
-        stag = new ScorchedStag(STAG_SPAWN_X, STAG_SPAWN_Y);
-      }
+      if (!target) return;
+      const pos = getBossSpawnNearPlayer(target);
+      const stag = new ScorchedStag(pos.x, pos.y);
       if (savedHp) {
         stag.hp = parseInt(savedHp, 10);
       }
@@ -2441,7 +2566,12 @@ function tickSpawning(world2) {
         x = chunk.cx * CHUNK_SIZE + Math.random() * CHUNK_SIZE;
         y = chunk.cy * CHUNK_SIZE + Math.random() * CHUNK_SIZE;
       }
-      if (Math.hypot(x, y) < SAFE_ZONE_RADIUS) continue;
+      const distFromOriginSpawn = Math.hypot(x, y);
+      if (distFromOriginSpawn < SAFE_ZONE_RADIUS + 50) {
+        const outAngle = Math.atan2(y, x);
+        x = Math.cos(outAngle) * (SAFE_ZONE_RADIUS + 50 + Math.random() * 100);
+        y = Math.sin(outAngle) * (SAFE_ZONE_RADIUS + 50 + Math.random() * 100);
+      }
       if (isCollidingWithBuildings2(x, y, world2)) continue;
       if (canSpawnLion && canSpawnGhost) {
         if (Math.random() < ghostRatio) {
@@ -2517,11 +2647,11 @@ function getBossSpawnNearPlayer(player) {
   const angle = player.facing + spread;
   const x = player.x + Math.cos(angle) * dist;
   const y = player.y + Math.sin(angle) * dist;
-  if (Math.hypot(x, y) < SAFE_ZONE_RADIUS + 100) {
+  if (Math.hypot(x, y) < SAFE_ZONE_RADIUS + 200) {
     const outAngle = Math.atan2(y, x);
     return {
-      x: Math.cos(outAngle) * (SAFE_ZONE_RADIUS + 200),
-      y: Math.sin(outAngle) * (SAFE_ZONE_RADIUS + 200)
+      x: Math.cos(outAngle) * (SAFE_ZONE_RADIUS + 400),
+      y: Math.sin(outAngle) * (SAFE_ZONE_RADIUS + 400)
     };
   }
   return { x, y };
@@ -2601,6 +2731,8 @@ var World = class {
   rules = [];
   /** Username of offline player who won but hasn't submitted their rule yet */
   pendingWinnerUsername = null;
+  /** Callback to refresh and broadcast sign data (set by server.ts) */
+  refreshSignData = null;
   /** Whether a rule is currently being implemented by AI */
   isImplementingRule = false;
   lastTick = Date.now();
@@ -4113,12 +4245,8 @@ function broadcastLeaderboard(world2) {
 }
 
 // server/src/registry/ServerRegistry.ts
-import { WebSocket } from "ws";
 var ServerRegistry = class {
   servers = /* @__PURE__ */ new Map();
-  constructor() {
-    setInterval(() => this.pingAll(), 3e4);
-  }
   /** Generate a 6-char alphanumeric code */
   generateCode() {
     const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -4145,8 +4273,7 @@ var ServerRegistry = class {
     this.servers.set(key, {
       ...data,
       lastHeartbeat: Date.now(),
-      code,
-      ping: existing?.ping ?? -1
+      code
     });
     return code;
   }
@@ -4155,37 +4282,6 @@ var ServerRegistry = class {
     for (const [key, server] of this.servers) {
       if (now - server.lastHeartbeat > HEARTBEAT_TIMEOUT) {
         this.servers.delete(key);
-      }
-    }
-  }
-  /** Measure WebSocket handshake latency to a server */
-  pingServer(host, port) {
-    return new Promise((resolve) => {
-      const start = performance.now();
-      const ws = new WebSocket(`ws://${host}:${port}`);
-      const timer = setTimeout(() => {
-        ws.terminate();
-        resolve(-1);
-      }, 3e3);
-      ws.on("open", () => {
-        clearTimeout(timer);
-        const ms = Math.round(performance.now() - start);
-        ws.close();
-        resolve(ms);
-      });
-      ws.on("error", () => {
-        clearTimeout(timer);
-        ws.terminate();
-        resolve(-1);
-      });
-    });
-  }
-  /** Ping all registered servers */
-  async pingAll() {
-    for (const [key, server] of this.servers) {
-      const ms = await this.pingServer(server.host, server.port);
-      if (this.servers.has(key)) {
-        server.ping = ms;
       }
     }
   }
@@ -4199,8 +4295,7 @@ var ServerRegistry = class {
       maxPlayers: s.maxPlayers,
       description: s.description,
       hasPassword: s.hasPassword,
-      isModded: s.isModded,
-      ...s.ping >= 0 ? { ping: s.ping } : {}
+      isModded: s.isModded
     }));
   }
 };
@@ -4338,6 +4433,10 @@ var MIME = {
 };
 var registry = new ServerRegistry();
 function startServer(world2) {
+  world2.refreshSignData = () => {
+    const signData = getSignData(world2);
+    world2.broadcastAll({ type: "sign_data", ...signData });
+  };
   const dailyWinner = new DailyWinnerScheduler(world2);
   setInterval(() => broadcastLeaderboard(world2), 1e4);
   const clientDir = path4.resolve(import.meta.dirname, "../../client");
