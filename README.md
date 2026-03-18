@@ -92,8 +92,8 @@ The daily champion system uses the Anthropic Claude API to implement rules. This
 | `ANTHROPIC_API_KEY` | *(empty)* | Your Anthropic API key. Without this, the rule system is disabled. |
 | `CLAUDE_MAX_TURNS` | `50` | Maximum agentic turns when implementing a rule |
 | `CLAUDE_MAX_TOKENS` | `16384` | Token limit per Claude API call |
-| `GITHUB_TOKEN` | *(empty)* | GitHub PAT for pushing rule code changes |
-| `GITHUB_REPO` | *(empty)* | GitHub repo (e.g. `yourname/plainscape-server`) for rule pushes |
+| `GITHUB_TOKEN` | *(empty)* | GitHub PAT for pushing rule code changes (see [GitHub Setup](#github-setup-for-rules--modding)) |
+| `GITHUB_REPO` | *(empty)* | Your forked GitHub repo (e.g. `yourname/PlainScape-Community`) — see [GitHub Setup](#github-setup-for-rules--modding) |
 
 ### Timing
 
@@ -111,11 +111,13 @@ Your server includes a **web-based admin console** at `http://127.0.0.1:4801` (l
 
 ### Features
 
-- **Dashboard** — Live player count, uptime, and server status at a glance
+- **Dashboard** — Live player count, uptime, server status, and automatic update checker
 - **Configuration** — Edit all server settings through a clean UI with labeled fields (no need to edit `.env` manually). Changes require a server restart.
 - **Claude Rules** — Markdown editor for custom AI guardrails that constrain what game rules players can create
 - **Players** — Searchable player list with the ability to grant/revoke admin and ban players
 - **Bans** — View and remove bans (bans are by fingerprint + IP address)
+- **Modding** — Toggle modded flag, promote live to stable, rollback to any previous state
+- **Commands** — Quick reference for all admin chat commands
 
 ### Configuration
 
@@ -298,9 +300,45 @@ At `RESET_HOUR` on `RESET_DAY` (default Sunday 8pm):
 - The Scorched Stag respawns
 - Player name reservations persist (6-week TTL)
 
-### Modding Your Server
+### GitHub Setup for Rules & Modding
 
-Each community server gets two git branches: `live` (running code) and `stable` (your baseline). The weekly reset reverts `live` back to `stable`, so daily rules are temporary by default.
+The AI rule system and modding features require a GitHub repository to store your server's code. Each server gets two branches: `live` (running code, changes with each daily rule) and `stable` (your baseline, persists across weekly resets). Since you need write access to push code, **you must use your own fork** — you cannot push to the main PlainScape-Community repo.
+
+#### Step-by-step setup
+
+1. **Fork the repo** — Go to [github.com/chvolk/PlainScape-Community](https://github.com/chvolk/PlainScape-Community) and click **Fork** (top-right). This creates your own copy at `github.com/yourname/PlainScape-Community`.
+
+2. **Create a Personal Access Token (PAT)**:
+   - Go to [github.com/settings/tokens](https://github.com/settings/tokens) → **Generate new token (classic)**
+   - Give it a name like "PlainScape Server"
+   - Select the `repo` scope (full control of private repositories)
+   - Click **Generate token** and copy it immediately (you won't see it again)
+
+3. **Configure your server** — In your `.env` file (or the admin console Configuration tab):
+   ```
+   GITHUB_TOKEN=ghp_your_token_here
+   GITHUB_REPO=yourname/PlainScape-Community
+   ```
+
+4. **Restart your server** — The branches `community/{your-server-code}/live` and `community/{your-server-code}/stable` will be created automatically on your fork when the server registers with the main server.
+
+#### How it works
+
+- **Daily rules** are implemented on your `live` branch — each rule is a commit pushed to your fork
+- **Weekly resets** revert `live` back to `stable` — clearing all daily rule changes
+- **PlainScape-Community main** (the official repo) is your upstream — you can always roll back to it for the vanilla baseline
+- Your fork is completely isolated — other server operators cannot see or modify your branches
+
+#### Keeping up to date
+
+When PlainScape releases updates, your fork doesn't automatically receive them. You can update via:
+
+- **Admin Console** → **Dashboard** — If an update is available, you'll see a banner with a changelog and an "Update" button that pulls the latest from PlainScape-Community main to your live branch
+- **Admin Console** → **Modding** → **Rollback** — Select "PlainScape Community main" to manually pull the latest vanilla version
+
+After updating your live branch, you can **Promote Live → Stable** to make the update your new baseline.
+
+### Modding Your Server
 
 To create a **persistently modded** server:
 
@@ -311,7 +349,13 @@ To create a **persistently modded** server:
 
 Now when the weekly reset happens, it'll revert to your modded stable instead of vanilla. Your custom changes persist across resets while daily rules still get cleared.
 
-**Requirements**: `GITHUB_TOKEN` and `GITHUB_REPO` must be set in your `.env` for branch management to work.
+#### Rollback options
+
+The **Rollback** dropdown in the Modding tab lets you revert your live branch to:
+
+- **Your stable branch** — Your custom baseline (useful after a bad daily rule)
+- **PlainScape Community main** — The latest vanilla version from the official repo
+- **Any specific commit** — Pick from the last 20 commits on your live branch
 
 ### Buildings
 
@@ -352,10 +396,18 @@ For players outside your local network to connect, you need to forward your serv
 
 ## Updates
 
-Check the [PlainScape-Community releases](https://github.com/chvolk/PlainScape-Community) for the latest server builds. To update:
+### Via Admin Console (recommended)
+
+If you have GitHub set up (see [GitHub Setup](#github-setup-for-rules--modding)), the admin console dashboard will automatically check for updates and show a banner when a new version is available. Click **Update** to pull the latest release to your live branch, then restart the server.
+
+### Via Electron Desktop App
+
+The Electron app checks for updates on launch and shows a banner on the home screen. Click **Download Update** to open the latest release page.
+
+### Manual update
 
 1. Stop your server (`/shutdown` in chat, or Ctrl+C)
-2. Download the new release
+2. Download the latest release from [PlainScape-Community releases](https://github.com/chvolk/PlainScape-Community/releases)
 3. Copy your `.env` and `plainscape.db` to the new folder
 4. Start the new server
 
