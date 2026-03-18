@@ -498,6 +498,23 @@
       color: #ccc;
       margin-top: 8px;
     }
+    #respawn-btn {
+      display: none;
+      margin-top: 16px;
+      padding: 12px 32px;
+      font-size: 20px;
+      font-family: inherit;
+      background: #4caf50;
+      color: #fff;
+      border: 2px solid #66bb6a;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    #respawn-btn:hover, #respawn-btn:focus {
+      background: #66bb6a;
+      outline: none;
+    }
 
     /* ── Event Feed ────────────────────────────────────── */
     /* ── Notification Feed (bottom-right, above minimap) */
@@ -2588,6 +2605,7 @@
     <div id="death-overlay">
       <div>YOU DIED</div>
       <div id="death-timer"></div>
+      <button id="respawn-btn">Respawn?</button>
     </div>
 
     <!-- ESC Menu -->

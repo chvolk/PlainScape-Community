@@ -65,6 +65,7 @@ var CELL_SIZE = 32;
 var SAFE_ZONE_RADIUS = 1300;
 var VIEW_RADIUS = 1600;
 var PLAYER_SIZE = 20;
+var INACTIVITY_TIMEOUT = 5 * 60 * 1e3;
 var PUNCH_RANGE = 52;
 var PUNCH_COOLDOWN = 900;
 var PUNCH_ARC = Math.PI / 2;
@@ -1275,6 +1276,7 @@ var GameState = class {
   selfPos = { x: 0, y: 0 };
   selfDead = false;
   selfRespawnAt = null;
+  readyToRespawn = false;
   selfColors = null;
   selfUsername = "";
   // Server info (from welcome message)
@@ -1833,6 +1835,7 @@ function drawLion(ctx, x, y, entity) {
   const BODY_SH = "#b08020";
   const MANE = "#7a3c14";
   const MANE_D = "#4c2408";
+  const isChase = entity.sub === "chase";
   ctx.save();
   ctx.translate(x, y);
   if (!facingRight) ctx.scale(-1, 1);
@@ -1903,7 +1906,7 @@ function drawLion(ctx, x, y, entity) {
   ctx.moveTo(tailBaseX, bob + 1);
   ctx.lineTo(tailTipX, tailTipY);
   ctx.stroke();
-  ctx.fillStyle = MANE_D;
+  ctx.fillStyle = isChase ? BODY_SH : MANE_D;
   ctx.fillRect(tailTipX - 2, tailTipY - 2, 4, 4);
   const legW = 4;
   const legH = 7;
@@ -1936,18 +1939,27 @@ function drawLion(ctx, x, y, entity) {
   ctx.fillRect(6, 3 + bob + legH + fLegY * 0.15, legW, 2);
   const mX = 7;
   const mY = -5 + bob + headBob;
-  ctx.fillStyle = O;
-  ctx.beginPath();
-  ctx.roundRect(mX - 9, mY - 8, 18, 17, 4);
-  ctx.fill();
-  ctx.fillStyle = MANE_D;
-  ctx.beginPath();
-  ctx.roundRect(mX - 8, mY - 7, 16, 15, 3);
-  ctx.fill();
-  ctx.fillStyle = MANE;
-  ctx.beginPath();
-  ctx.roundRect(mX - 6, mY - 5, 12, 11, 2);
-  ctx.fill();
+  if (isChase) {
+    ctx.fillStyle = O;
+    ctx.fillRect(mX - 4, mY - 6, 10, 5);
+    ctx.fillStyle = BODY_SH;
+    ctx.fillRect(mX - 3, mY - 5, 8, 4);
+    ctx.fillStyle = BODY;
+    ctx.fillRect(mX - 2, mY - 4, 6, 3);
+  } else {
+    ctx.fillStyle = O;
+    ctx.beginPath();
+    ctx.roundRect(mX - 9, mY - 8, 18, 17, 4);
+    ctx.fill();
+    ctx.fillStyle = MANE_D;
+    ctx.beginPath();
+    ctx.roundRect(mX - 8, mY - 7, 16, 15, 3);
+    ctx.fill();
+    ctx.fillStyle = MANE;
+    ctx.beginPath();
+    ctx.roundRect(mX - 6, mY - 5, 12, 11, 2);
+    ctx.fill();
+  }
   const hX = 11;
   const hY = -3 + bob + headBob;
   ctx.fillStyle = O;
@@ -1962,7 +1974,7 @@ function drawLion(ctx, x, y, entity) {
   ctx.fillRect(hX - 4, hY - 3, 8, 3);
   ctx.fillStyle = O;
   ctx.fillRect(hX - 4, hY - 8, 4, 4);
-  ctx.fillStyle = MANE;
+  ctx.fillStyle = isChase ? BODY_SH : MANE;
   ctx.fillRect(hX - 3, hY - 7, 2, 2);
   ctx.fillStyle = "#d4977a";
   ctx.fillRect(hX - 3, hY - 6, 1, 1);
@@ -3509,9 +3521,13 @@ function drawHud(ctx, state2, screenW, screenH) {
   if (deathOverlay) {
     if (state2.selfDead) {
       deathOverlay.style.display = "flex";
-      if (deathTimer && state2.selfRespawnAt) {
-        const remaining = Math.max(0, Math.ceil((state2.selfRespawnAt - Date.now()) / 1e3));
-        deathTimer.textContent = `Respawning in ${remaining}s`;
+      if (deathTimer) {
+        if (state2.selfRespawnAt) {
+          const remaining = Math.max(0, Math.ceil((state2.selfRespawnAt - Date.now()) / 1e3));
+          deathTimer.textContent = `Respawning in ${remaining}s`;
+        } else {
+          deathTimer.textContent = "";
+        }
       }
     } else {
       deathOverlay.style.display = "none";
@@ -6127,6 +6143,12 @@ function handleMessage(msg) {
         snap.selfBankedSource,
         snap.selfBuildingCount
       );
+      if (!snap.selfDead && state.readyToRespawn) {
+        state.readyToRespawn = false;
+        const btn = document.getElementById("respawn-btn");
+        if (btn) btn.style.display = "none";
+        input?.menuNav.deactivate();
+      }
       break;
     }
     case "event": {
@@ -6189,7 +6211,7 @@ function handleMessage(msg) {
       addNotification(msg.text);
       let notifClass = "";
       if (msg.text.includes("rule") || msg.text.includes("Rule")) notifClass = "notif-rule";
-      else if (msg.text.includes("killed")) notifClass = "notif-death";
+      else if (msg.text.includes("murdered") || msg.text.includes("betrayed") || msg.text.includes("killed") || msg.text.includes("eaten") || msg.text.includes("claimed") || msg.text.includes("turret")) notifClass = "notif-death";
       addMobileNotification(msg.text, notifClass);
       break;
     }
@@ -6217,6 +6239,26 @@ function handleMessage(msg) {
     case "sign_data": {
       state.patchNotes = msg.patchNotes;
       state.adminNotices = msg.notices;
+      break;
+    }
+    case "ready_to_respawn": {
+      state.readyToRespawn = true;
+      const btn = document.getElementById("respawn-btn");
+      if (btn) btn.style.display = "block";
+      if (input) {
+        const overlay = document.getElementById("death-overlay");
+        input.menuNav.activate(overlay, () => {
+        });
+      }
+      break;
+    }
+    case "kicked": {
+      state.readyToRespawn = false;
+      const respBtn = document.getElementById("respawn-btn");
+      if (respBtn) respBtn.style.display = "none";
+      input?.menuNav.deactivate();
+      if (input?.onLogout) input.onLogout();
+      setTimeout(() => showError(msg.reason), 50);
       break;
     }
   }
@@ -6254,7 +6296,7 @@ function addNotification(text) {
   el.className = "notif-msg";
   if (text.includes("rule") || text.includes("Rule") || text.includes("implementing") || text.includes("implemented")) {
     el.classList.add("notif-rule");
-  } else if (text.includes("killed") || text.includes("was killed")) {
+  } else if (text.includes("murdered") || text.includes("betrayed") || text.includes("killed") || text.includes("eaten") || text.includes("claimed") || text.includes("turret")) {
     el.classList.add("notif-death");
   } else if (text.includes("joined")) {
     el.classList.add("notif-join");
@@ -6498,6 +6540,8 @@ function startGameLoop() {
     }
   };
   input.onLogout = () => {
+    running = false;
+    clearHiddenTimer();
     conn.disconnect();
     const joinScreen = document.getElementById("join-screen");
     const gameScreen = document.getElementById("game-screen");
@@ -6592,8 +6636,38 @@ function startGameLoop() {
       membersDiv.appendChild(row);
     }
   }
+  const respawnBtn = document.getElementById("respawn-btn");
+  if (respawnBtn) {
+    respawnBtn.addEventListener("click", () => {
+      conn.send({ type: "respawn" });
+      respawnBtn.style.display = "none";
+      state.readyToRespawn = false;
+      input.menuNav.deactivate();
+    });
+  }
+  let hiddenTimer = null;
+  const CLIENT_INACTIVITY_MS = 6e4;
+  function startHiddenTimer() {
+    if (hiddenTimer) return;
+    hiddenTimer = setTimeout(() => {
+      if (input.onLogout) input.onLogout();
+    }, CLIENT_INACTIVITY_MS);
+  }
+  function clearHiddenTimer() {
+    if (hiddenTimer) {
+      clearTimeout(hiddenTimer);
+      hiddenTimer = null;
+    }
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) startHiddenTimer();
+    else clearHiddenTimer();
+  });
+  window.addEventListener("blur", startHiddenTimer);
+  window.addEventListener("focus", clearHiddenTimer);
   let wasDead = false;
   function loop() {
+    if (!running) return;
     if (state.selfDead && !wasDead) input.clearKeys();
     wasDead = state.selfDead;
     input.sendInput();

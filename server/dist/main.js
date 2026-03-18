@@ -43,6 +43,7 @@ var PLAYER_SPEED = 150;
 var PLAYER_HP = 10;
 var PLAYER_SIZE = 20;
 var RESPAWN_TIME = 3e3;
+var INACTIVITY_TIMEOUT = 5 * 60 * 1e3;
 var PUNCH_DAMAGE = 2;
 var PUNCH_RANGE = 52;
 var PUNCH_COOLDOWN = 900;
@@ -69,6 +70,7 @@ var ARROW_TTL = 1e3;
 var LION_HP = 6;
 var LION_SPEED = 100;
 var LION_DAMAGE = 1;
+var LION_BUILDING_DAMAGE = 3;
 var LION_ATTACK_RANGE = 36;
 var LION_ATTACK_COOLDOWN = 3e3;
 var LION_MELEE_COOLDOWN = 800;
@@ -695,6 +697,7 @@ var Enemy = class extends Entity {
   aiState = "idle";
   targetId = null;
   aggroTargetId = null;
+  aggroTurretId = null;
   lastAttackTime = 0;
   // Wander anchor
   spawnX;
@@ -929,6 +932,14 @@ function onPlayerDisconnect(world2, player) {
 }
 
 // server/src/systems/CombatHelpers.ts
+var DISTANCE_BONUS_EDGE = SAFE_ZONE_RADIUS + NO_BUILD_BUFFER;
+var DISTANCE_BONUS_STEP = 500;
+var DISTANCE_BONUS_PER_STEP = 2;
+function distanceBonus(x, y) {
+  const dist = Math.hypot(x, y) - DISTANCE_BONUS_EDGE;
+  if (dist <= 0) return 0;
+  return Math.floor(dist / DISTANCE_BONUS_STEP) * DISTANCE_BONUS_PER_STEP;
+}
 function awardSource(player, amount, world2) {
   if (world2 && player.partyId !== null) {
     const members = getPartyMembers(world2, player);
@@ -951,55 +962,87 @@ function awardSource(player, amount, world2) {
   player.sourceFlushDirty += amount;
   if (player.partyId !== null) player.partySourceEarned += amount;
 }
-function killPlayer(world2, victim, killer) {
+function killPlayer(world2, victim, killer, opts) {
   victim.dead = true;
   victim.hp = 0;
   victim.anim = "dead";
   victim.shieldActive = false;
   victim.respawnAt = Date.now() + RESPAWN_TIME;
   const lostSource = victim.source;
-  if (killer && killer.kind === "player") {
+  if (killer && killer.kind === "player" && !opts?.turretOwner) {
     const killerPlayer = killer;
     const totalGain = SOURCE_PLAYER_KILL_AMOUNT + lostSource;
     awardSource(killerPlayer, totalGain, world2);
     world2.sendEvent(killerPlayer, "kill", `You killed ${victim.username}! +${totalGain} Source`);
     victim.source = 0;
     world2.sendEvent(victim, "death", `Killed by ${killerPlayer.username}! Lost ${lostSource} unbanked Source.`);
-    world2.broadcastAll({
-      type: "notification",
-      text: `${killerPlayer.username} killed ${victim.username}`
-    });
+    const sameParty = killerPlayer.partyId !== null && killerPlayer.partyId === victim.partyId;
+    const notifText = sameParty ? `${victim.username} was betrayed by ${killerPlayer.username} and robbed of ${lostSource} Source!` : `${victim.username} was murdered by ${killerPlayer.username} and lost ${lostSource} Source!`;
+    world2.broadcastAll({ type: "notification", text: notifText });
+  } else if (opts?.turretOwner) {
+    const ownerPlayer = killer;
+    if (ownerPlayer) {
+      const totalGain = SOURCE_PLAYER_KILL_AMOUNT + lostSource;
+      awardSource(ownerPlayer, totalGain, world2);
+      world2.sendEvent(ownerPlayer, "kill", `Your turret killed ${victim.username}! +${totalGain} Source`);
+    }
+    victim.source = 0;
+    world2.sendEvent(victim, "death", `Killed by ${opts.turretOwner}'s turret! Lost ${lostSource} unbanked Source.`);
+    world2.broadcastAll({ type: "notification", text: `${victim.username} was killed by ${opts.turretOwner}'s turret and lost ${lostSource} Source!` });
   } else {
     const lost = Math.floor(lostSource / 2);
     victim.source -= lost;
     awardSource(victim, SOURCE_DEATH_AMOUNT, world2);
     world2.sendEvent(victim, "death", `You died! Lost ${lost} Source. +${SOURCE_DEATH_AMOUNT} Source`);
-    const killerKind = killer ? killer.kind : "the wilds";
-    world2.broadcastAll({
-      type: "notification",
-      text: `${victim.username} was killed by ${killerKind}`
-    });
+    let notifText;
+    if (killer) {
+      switch (killer.kind) {
+        case "lion":
+          notifText = `${victim.username} was eaten by lions`;
+          break;
+        case "ghost":
+          notifText = `${victim.username} was killed by ghosts`;
+          break;
+        case "stag":
+          notifText = `The Scorched Stag claimed ${victim.username}'s soul`;
+          break;
+        default:
+          notifText = `${victim.username} was killed by ${killer.kind}`;
+      }
+    } else {
+      notifText = `${victim.username} was killed by the wilds`;
+    }
+    world2.broadcastAll({ type: "notification", text: notifText });
   }
 }
 function tickRespawns(world2) {
   const now = Date.now();
   for (const [, player] of world2.players) {
-    if (!player.dead || !player.respawnAt) continue;
-    if (now < player.respawnAt) continue;
-    const oldX = player.x;
-    const oldY = player.y;
-    if (player.bedX !== null && player.bedY !== null) {
-      player.x = player.bedX;
-      player.y = player.bedY;
-    } else {
-      player.x = (Math.random() - 0.5) * 200;
-      player.y = (Math.random() - 0.5) * 200;
+    if (!player.dead) continue;
+    if (player.respawnAt && now >= player.respawnAt && !player.readyToRespawn) {
+      player.respawnAt = null;
+      player.readyToRespawn = true;
+      player.send({ type: "ready_to_respawn" });
+      continue;
     }
-    world2.chunks.updateEntityChunk(player, oldX, oldY);
-    player.dead = false;
-    player.hp = PLAYER_HP;
-    player.respawnAt = null;
-    player.anim = "idle";
+    if (player.readyToRespawn && player.pendingRespawn) {
+      const oldX = player.x;
+      const oldY = player.y;
+      if (player.bedX !== null && player.bedY !== null) {
+        player.x = player.bedX;
+        player.y = player.bedY;
+      } else {
+        player.x = (Math.random() - 0.5) * 200;
+        player.y = (Math.random() - 0.5) * 200;
+      }
+      world2.chunks.updateEntityChunk(player, oldX, oldY);
+      player.dead = false;
+      player.hp = PLAYER_HP;
+      player.respawnAt = null;
+      player.readyToRespawn = false;
+      player.pendingRespawn = false;
+      player.anim = "idle";
+    }
   }
 }
 
@@ -1212,6 +1255,7 @@ function performConeAttack(world2, attacker, facing, damage, range) {
         } else if (enemy.kind === "ghost") {
           if (phase === "dusk") killReward += SOURCE_TRANSITION_BONUS;
         }
+        killReward += distanceBonus(attacker.x, attacker.y);
         awardSource(attacker, killReward, world2);
         world2.sendEvent(attacker, "kill", `You killed a ${enemy.kind}! +${killReward} Source`);
       }
@@ -1323,6 +1367,7 @@ function performLunge(world2, player, facing) {
         } else if (enemy.kind === "ghost") {
           if (lungePhase === "dusk") lungeKillReward += SOURCE_TRANSITION_BONUS;
         }
+        lungeKillReward += distanceBonus(player.x, player.y);
         awardSource(player, lungeKillReward, world2);
         world2.sendEvent(player, "kill", `You killed a ${enemy.kind}! +${lungeKillReward} Source`);
       }
@@ -1366,12 +1411,20 @@ function performLunge(world2, player, facing) {
 // server/src/systems/ProjectileSystem.ts
 function applyEnemyHit(world2, proj, enemy) {
   if (enemy.intangible) {
-    enemy.aggroTargetId = proj.ownerId;
+    if (proj.ownerType === "turret") {
+      enemy.aggroTurretId = proj.ownerId;
+    } else {
+      enemy.aggroTargetId = proj.ownerId;
+    }
     return;
   }
   const damage = proj.damage + enemy.rangedBonusDamage;
   enemy.hp -= damage;
-  enemy.aggroTargetId = proj.ownerId;
+  if (proj.ownerType === "turret") {
+    enemy.aggroTurretId = proj.ownerId;
+  } else {
+    enemy.aggroTargetId = proj.ownerId;
+  }
   if (enemy instanceof ScorchedStag && proj.ownerType === "player") {
     const owner = world2.players.get(proj.ownerId);
     if (owner) enemy.logDamage(owner.token, owner.username, damage);
@@ -1397,6 +1450,7 @@ function applyEnemyHit(world2, proj, enemy) {
         } else if (enemy.kind === "ghost") {
           if (phase === "dusk") reward += SOURCE_TRANSITION_BONUS;
         }
+        reward += distanceBonus(owner.x, owner.y);
         awardSource(owner, reward, world2);
         world2.sendEvent(owner, "kill", `You killed a ${enemy.kind}! +${reward} Source`);
       }
@@ -1507,8 +1561,18 @@ function tickProjectiles(world2, delta) {
           }
           player.hp -= proj.damage;
           if (player.hp <= 0) {
-            const killer = proj.ownerType === "player" ? world2.players.get(proj.ownerId) : void 0;
-            killPlayer(world2, player, killer);
+            if (proj.ownerType === "turret" && proj.turretOwnerName) {
+              const owner = world2.playersByUsername.get(proj.turretOwnerName);
+              killPlayer(world2, player, owner, { turretOwner: proj.turretOwnerName });
+            } else {
+              let killer;
+              if (proj.ownerType === "player") {
+                killer = world2.players.get(proj.ownerId);
+              } else if (proj.ownerType === "enemy") {
+                killer = world2.enemies.get(proj.ownerId);
+              }
+              killPlayer(world2, player, killer);
+            }
           }
           hit = true;
           break;
@@ -1575,7 +1639,12 @@ function applyTurretAoe(world2, proj, alreadyHit) {
     if (Math.hypot(player.x - proj.x, player.y - proj.y) < proj.aoeRadius) {
       player.hp -= proj.damage;
       if (player.hp <= 0) {
-        killPlayer(world2, player, void 0);
+        if (proj.turretOwnerName) {
+          const owner = world2.playersByUsername.get(proj.turretOwnerName);
+          killPlayer(world2, player, owner, { turretOwner: proj.turretOwnerName });
+        } else {
+          killPlayer(world2, player, void 0);
+        }
       }
     }
   }
@@ -1622,6 +1691,7 @@ var Lion = class extends Enemy {
   }
   toSnap() {
     const snap = super.toSnap();
+    if (this.isReinforcement) snap.sub = "chase";
     if (this.pouncing) {
       if (this.pouncePhase === "windup") snap.anim = "windup";
       else if (this.pouncePhase === "leap") snap.anim = "pounce";
@@ -1682,6 +1752,9 @@ var Ghost = class extends Enemy {
 
 // server/src/systems/ai/AIHelpers.ts
 var BUILDING_ATTACK_COOLDOWN = 800;
+function getBuildingDamage(enemy) {
+  return enemy.kind === "lion" ? LION_BUILDING_DAMAGE : enemy.damage;
+}
 function isInsideBuilding(x, y, world2) {
   const half = 12;
   const minCX = Math.floor((x - half) / CELL_SIZE);
@@ -1764,7 +1837,7 @@ function attackBlockingBuilding(world2, enemy, target, now) {
     const cellY = Math.floor(checkY / CELL_SIZE);
     const building = world2.chunks.getBuildingAtCell(cellX, cellY);
     if (building && building.isSolid()) {
-      building.hp -= enemy.damage;
+      building.hp -= getBuildingDamage(enemy);
       enemy.lastBuildingAttack = now;
       if (building.hp <= 0) {
         world2.removeBuilding(building);
@@ -1772,6 +1845,51 @@ function attackBlockingBuilding(world2, enemy, target, now) {
       return;
     }
   }
+}
+function tickTurretAggro(world2, enemy, delta) {
+  if (enemy.aggroTurretId === null) return false;
+  const turret = world2.buildingsById.get(enemy.aggroTurretId);
+  if (!turret || turret.btype !== "turret") {
+    enemy.aggroTurretId = null;
+    return false;
+  }
+  const dist = Math.hypot(turret.x - enemy.x, turret.y - enemy.y);
+  enemy.facing = Math.atan2(turret.y - enemy.y, turret.x - enemy.x);
+  if (dist > CELL_SIZE * 1.5) {
+    moveEnemy(enemy, turret.x, turret.y, world2.chunks, delta);
+    enemy.aiState = "chase";
+    const now = Date.now();
+    if (now >= enemy.lastBuildingAttack + BUILDING_ATTACK_COOLDOWN) {
+      const angle = Math.atan2(turret.y - enemy.y, turret.x - enemy.x);
+      for (let step = 1; step <= 2; step++) {
+        const checkX = enemy.x + Math.cos(angle) * CELL_SIZE * step * 0.5;
+        const checkY = enemy.y + Math.sin(angle) * CELL_SIZE * step * 0.5;
+        const cellX = Math.floor(checkX / CELL_SIZE);
+        const cellY = Math.floor(checkY / CELL_SIZE);
+        const blocking = world2.chunks.getBuildingAtCell(cellX, cellY);
+        if (blocking && blocking.isSolid() && blocking.id !== turret.id) {
+          blocking.hp -= getBuildingDamage(enemy);
+          enemy.lastBuildingAttack = now;
+          if (blocking.hp <= 0) {
+            world2.removeBuilding(blocking);
+          }
+          break;
+        }
+      }
+    }
+  } else {
+    const now = Date.now();
+    if (now >= enemy.lastBuildingAttack + BUILDING_ATTACK_COOLDOWN) {
+      turret.hp -= getBuildingDamage(enemy);
+      enemy.lastBuildingAttack = now;
+      enemy.aiState = "attack";
+      if (turret.hp <= 0) {
+        world2.removeBuilding(turret);
+        enemy.aggroTurretId = null;
+      }
+    }
+  }
+  return true;
 }
 function findNearestPlayer(world2, enemy) {
   if (enemy.aggroTargetId !== null) {
@@ -1845,7 +1963,7 @@ function tickLion(world2, lion, target, dist, delta) {
           const cellY = Math.floor(nextY / CELL_SIZE);
           const building = world2.chunks.getBuildingAtCell(cellX, cellY);
           if (building && building.isSolid()) {
-            building.hp -= lion.damage;
+            building.hp -= LION_BUILDING_DAMAGE;
             if (building.hp <= 0) {
               world2.removeBuilding(building);
             }
@@ -1887,7 +2005,7 @@ function tickLion(world2, lion, target, dist, delta) {
             if (lion.hp <= 0) {
               lion.markedForRemoval = true;
               world2.suppressSpawnsAt(lion.x, lion.y);
-              const lionReward = SOURCE_LION_KILL_AMOUNT + (getDayPhase() === "dawn" ? SOURCE_TRANSITION_BONUS : 0);
+              const lionReward = SOURCE_LION_KILL_AMOUNT + (getDayPhase() === "dawn" ? SOURCE_TRANSITION_BONUS : 0) + distanceBonus(player.x, player.y);
               awardSource(player, lionReward, world2);
               world2.sendEvent(player, "kill", `You killed a lion! +${lionReward} Source`);
               world2.broadcastAll({
@@ -1899,7 +2017,7 @@ function tickLion(world2, lion, target, dist, delta) {
           } else {
             player.hp -= lion.damage;
             if (player.hp <= 0) {
-              killPlayer(world2, player);
+              killPlayer(world2, player, lion);
             }
           }
         }
@@ -1995,7 +2113,7 @@ function tickLion(world2, lion, target, dist, delta) {
         if (nearPlayer.parryActive) {
           lion.hp -= lion.damage * PARRY_REFLECT_MULT;
           if (lion.hp <= 0) {
-            const parryLionReward = SOURCE_LION_KILL_AMOUNT + (getDayPhase() === "dawn" ? SOURCE_TRANSITION_BONUS : 0);
+            const parryLionReward = SOURCE_LION_KILL_AMOUNT + (getDayPhase() === "dawn" ? SOURCE_TRANSITION_BONUS : 0) + distanceBonus(nearPlayer.x, nearPlayer.y);
             awardSource(nearPlayer, parryLionReward, world2);
             world2.sendEvent(nearPlayer, "kill", `You killed a lion! +${parryLionReward} Source`);
             lion.markedForRemoval = true;
@@ -2008,7 +2126,7 @@ function tickLion(world2, lion, target, dist, delta) {
         } else {
           nearPlayer.hp -= lion.damage;
           if (nearPlayer.hp <= 0) {
-            killPlayer(world2, nearPlayer);
+            killPlayer(world2, nearPlayer, lion);
           }
         }
       }
@@ -2141,10 +2259,10 @@ function tickStag(world2, stag, target, dist, delta) {
         const pDist = Math.hypot(player.x - stag.x, player.y - stag.y);
         if (pDist <= STAG_MELEE_RANGE + 20) {
           player.hp -= STAG_CHARGE_DAMAGE;
-          if (player.hp <= 0) killPlayer(world2, player);
+          if (player.hp <= 0) killPlayer(world2, player, stag);
         } else if (pDist <= STAG_CHARGE_AOE_RADIUS) {
           player.hp -= STAG_CHARGE_AOE_DAMAGE;
-          if (player.hp <= 0) killPlayer(world2, player);
+          if (player.hp <= 0) killPlayer(world2, player, stag);
         }
       }
       stag.lastAttackTime = now;
@@ -2162,7 +2280,7 @@ function tickStag(world2, stag, target, dist, delta) {
         const pDist = Math.hypot(player.x - stag.x, player.y - stag.y);
         if (pDist <= hitRange) {
           player.hp -= STAG_CHARGE_DAMAGE;
-          if (player.hp <= 0) killPlayer(world2, player);
+          if (player.hp <= 0) killPlayer(world2, player, stag);
           stag.lastAttackTime = now;
         }
       }
@@ -2217,7 +2335,7 @@ function tickStag(world2, stag, target, dist, delta) {
       if (!target.shieldActive) {
         const dmg = Math.max(1, Math.floor(target.hp / 2));
         target.hp -= dmg;
-        if (target.hp <= 0) killPlayer(world2, target);
+        if (target.hp <= 0) killPlayer(world2, target, stag);
       }
       stag.lastMeleeTime = now;
       stag.lastAttackTime = now;
@@ -2250,6 +2368,7 @@ function tickAI(world2, delta, doSeparation = true) {
       target = findNearestPlayer(world2, enemy);
     }
     if (!target) {
+      if (tickTurretAggro(world2, enemy, delta)) continue;
       wander(enemy, delta, world2);
       enemy.aiState = "idle";
       if (enemy instanceof Lion) {
@@ -2262,6 +2381,7 @@ function tickAI(world2, delta, doSeparation = true) {
       }
       continue;
     }
+    enemy.aggroTurretId = null;
     const dist = Math.hypot(target.x - enemy.x, target.y - enemy.y);
     enemy.facing = Math.atan2(target.y - enemy.y, target.x - enemy.x);
     if (enemy instanceof ScorchedStag) {
@@ -2763,6 +2883,18 @@ function tickPersistence(world2) {
   }
 }
 
+// server/src/systems/InactivitySystem.ts
+function tickInactivity(world2, now) {
+  for (const [, player] of world2.players) {
+    if (player.kicked) continue;
+    if (now - player.lastActivityTime >= INACTIVITY_TIMEOUT) {
+      player.kicked = true;
+      player.send({ type: "kicked", reason: "Kicked for inactivity" });
+      setTimeout(() => player.ws.close(), 200);
+    }
+  }
+}
+
 // server/src/world/World.ts
 var World = class {
   db;
@@ -2909,6 +3041,9 @@ var World = class {
     this.cleanupDead();
     tickPersistence(this);
     tickPartyUpdates(this, now);
+    if (this.tickCount % 10 === 0) {
+      tickInactivity(this, now);
+    }
     if (now - this.lastBuildingSave >= 3e4) {
       for (const [, b] of this.buildingsById) {
         this.db.saveBuilding(b.id, b.btype, b.cellX, b.cellY, b.ownerName, b.hp, b.whitelist);
@@ -3122,6 +3257,8 @@ var Player = class extends Entity {
   // Death & respawn
   dead = false;
   respawnAt = null;
+  readyToRespawn = false;
+  pendingRespawn = false;
   bedX = null;
   bedY = null;
   bedBuildingId = null;
@@ -3132,6 +3269,9 @@ var Player = class extends Entity {
   buildingCount = 0;
   // Chat rate limiting
   lastChatTime = 0;
+  // Inactivity tracking
+  lastActivityTime = Date.now();
+  kicked = false;
   // Safe zone attack warning throttle
   lastSafeZoneWarn = 0;
   // Stun (from lunge hits)
@@ -4785,6 +4925,7 @@ function startServer(world2) {
           player.totalSourceGenerated = dbPlayer.total_source_generated;
           player.statLevels = world2.db.getStatLevels(token);
           player.bankedSource = world2.db.getBankedSource(token);
+          player.globalWhitelist = world2.db.getGlobalWhitelist(token);
           player.buildingCount = buildingCount;
           if (bedId !== null) {
             player.bedBuildingId = bedId;
@@ -4825,6 +4966,7 @@ function startServer(world2) {
         }
         case "input": {
           if (!player) return;
+          player.lastActivityTime = Date.now();
           player.applyInput(msg);
           break;
         }
@@ -4860,12 +5002,14 @@ function startServer(world2) {
         }
         case "place": {
           if (!player || player.dead) return;
+          player.lastActivityTime = Date.now();
           console.log(`[Server] ${player.username} placing ${msg.btype} at ${msg.cellX},${msg.cellY} (source:${player.source} buildings:${player.buildingCount})`);
           handlePlaceBuilding(world2, player, msg.btype, msg.cellX, msg.cellY);
           break;
         }
         case "destroy": {
           if (!player || player.dead) return;
+          player.lastActivityTime = Date.now();
           const building = world2.buildingsById.get(msg.targetId);
           if (building) {
             world2.removeBuilding(building);
@@ -4893,6 +5037,7 @@ function startServer(world2) {
           if (!player) return;
           const names = (msg.usernames || []).filter((u) => typeof u === "string" && u.length > 0 && u.length <= USERNAME_MAX_LENGTH).slice(0, 20);
           player.globalWhitelist = names;
+          world2.db.setGlobalWhitelist(player.token, names);
           for (const [, b] of world2.buildingsById) {
             if (b.ownerName !== player.username) continue;
             if (b.btype !== "gate" && b.btype !== "turret") continue;
@@ -4938,6 +5083,7 @@ function startServer(world2) {
         }
         case "chat": {
           if (!player) return;
+          player.lastActivityTime = Date.now();
           const chatText = typeof msg.text === "string" ? msg.text.trim().slice(0, 200) : "";
           if (!chatText) return;
           const chatNow = Date.now();
@@ -5228,6 +5374,12 @@ function startServer(world2) {
           leaveParty(world2, player);
           break;
         }
+        case "respawn": {
+          if (!player || !player.dead || !player.readyToRespawn) return;
+          player.lastActivityTime = Date.now();
+          player.pendingRespawn = true;
+          break;
+        }
       }
     });
     ws.on("close", () => {
@@ -5373,6 +5525,10 @@ var GameDatabase = class {
     } catch {
     }
     try {
+      this.db.exec(`ALTER TABLE players ADD COLUMN global_whitelist TEXT NOT NULL DEFAULT '[]'`);
+    } catch {
+    }
+    try {
       this.db.exec(`ALTER TABLE rules ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'`);
     } catch {
     }
@@ -5440,7 +5596,10 @@ var GameDatabase = class {
       // Player fingerprint/IP
       setFingerprint: this.db.prepare("UPDATE players SET fingerprint = ? WHERE token = ?"),
       setLastIp: this.db.prepare("UPDATE players SET last_ip = ? WHERE token = ?"),
-      getAllPlayers: this.db.prepare("SELECT token, username, fingerprint, last_ip, total_source_generated, banked_source, last_seen, created_at FROM players ORDER BY last_seen DESC")
+      getAllPlayers: this.db.prepare("SELECT token, username, fingerprint, last_ip, total_source_generated, banked_source, last_seen, created_at FROM players ORDER BY last_seen DESC"),
+      // Global whitelist
+      getGlobalWhitelist: this.db.prepare("SELECT global_whitelist FROM players WHERE token = ?"),
+      setGlobalWhitelist: this.db.prepare("UPDATE players SET global_whitelist = ? WHERE token = ?")
     };
   }
   findPlayerByToken(token) {
@@ -5597,6 +5756,19 @@ var GameDatabase = class {
   }
   deleteNotice(id) {
     this.stmts.deleteNotice.run(id);
+  }
+  // ── Global Whitelist ──
+  getGlobalWhitelist(token) {
+    const row = this.stmts.getGlobalWhitelist.get(token);
+    if (!row || !row.global_whitelist || row.global_whitelist === "[]") return [];
+    try {
+      return JSON.parse(row.global_whitelist);
+    } catch {
+      return [];
+    }
+  }
+  setGlobalWhitelist(token, whitelist) {
+    this.stmts.setGlobalWhitelist.run(JSON.stringify(whitelist), token);
   }
   // ── Bans ──
   addBan(fingerprint, ip, username, reason, bannedBy) {

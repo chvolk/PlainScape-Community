@@ -1,5 +1,20 @@
 [
   {
+    "version": "1.2.0",
+    "date": "2026-03-18",
+    "changes": [
+      "Respawn confirmation: you must click 'Respawn?' after dying instead of auto-respawning",
+      "Inactivity kick: idle players are logged out after 5 minutes, tab-hidden players after 1 minute",
+      "Improved death notifications: murdered, betrayed, eaten by lions, killed by turrets, and more",
+      "Distance bonus: earn +2 Source per kill for every 500 units from the safe zone edge",
+      "AI now attacks turrets that shoot at them and breaks through walls to reach them",
+      "Lions deal more damage to buildings (3, matching ghosts)",
+      "Chase lions are now female (maneless)",
+      "Global whitelist now persists across sessions",
+      "Player kill notifications show how much Source was lost"
+    ]
+  },
+  {
     "version": "0.5.0",
     "date": "2026-03-15",
     "changes": [
@@ -22,14 +37,6 @@
       "Lions scale speed to match your stats — no more outrunning them",
       "Mobile support: virtual joysticks, touch controls, and landscape mode",
       "Scorched Stag now rewards 400 Source on kill"
-    ]
-  },
-  {
-    "version": "0.3.0",
-    "date": "2026-03-13",
-    "changes": [
-      "Added interactive signs to the safe zone",
-      "Patch notes, active rules, and admin notices now viewable in-game"
     ]
   }
 ]
