@@ -6641,6 +6641,20 @@ function appHtml(serverName) {
         </div>
         <div id="promote-result" style="margin-top:8px;font-size:13px;"></div>
       </div>
+
+      <div class="config-group">
+        <div class="config-group-title">Rollback</div>
+        <div style="padding:12px 0;color:var(--text-dim);font-size:13px;line-height:1.6;">
+          <p>Roll back your live branch to a previous state. Choose your <strong style="color:var(--text)">stable branch</strong>, <strong style="color:var(--text)">PlainScape Community main</strong> (vanilla baseline), or a specific commit from your live branch history.</p>
+        </div>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+          <select id="rollback-select" class="config-input" style="max-width:500px;font-family:'Segoe UI',system-ui,sans-serif;cursor:pointer;">
+            <option value="">Loading commits...</option>
+          </select>
+          <button class="btn btn-danger" id="rollback-btn" disabled>Rollback</button>
+        </div>
+        <div id="rollback-result" style="margin-top:8px;font-size:13px;"></div>
+      </div>
     </div>
   </main>
 </div>
@@ -7124,6 +7138,7 @@ function appHtml(serverName) {
       label.style.color = d.isModded ? 'var(--green)' : 'var(--text-dim)';
       codeEl.textContent = d.serverCode || '\u2014 (not registered yet)';
     });
+    loadRollbackCommits();
   }
 
   document.getElementById('modded-toggle').addEventListener('change', function() {
@@ -7152,6 +7167,95 @@ function appHtml(serverName) {
         resultEl.textContent = d.message;
         resultEl.style.color = 'var(--green)';
         toast('Promoted to stable');
+      } else {
+        resultEl.textContent = (d && d.error) || 'Failed';
+        resultEl.style.color = 'var(--danger)';
+      }
+    });
+  });
+
+  // \u2500\u2500 Rollback \u2500\u2500
+  function loadRollbackCommits() {
+    var sel = document.getElementById('rollback-select');
+    var btn = document.getElementById('rollback-btn');
+    // Clear with DOM methods (safe, no innerHTML with untrusted data)
+    while (sel.firstChild) sel.removeChild(sel.firstChild);
+    var loadingOpt = document.createElement('option');
+    loadingOpt.value = '';
+    loadingOpt.textContent = 'Loading commits...';
+    sel.appendChild(loadingOpt);
+    btn.disabled = true;
+
+    api('/api/rollback-commits').then(function(d) {
+      while (sel.firstChild) sel.removeChild(sel.firstChild);
+
+      if (!d || d.error) {
+        var errOpt = document.createElement('option');
+        errOpt.value = '';
+        errOpt.textContent = d ? d.error : 'Failed to load';
+        sel.appendChild(errOpt);
+        return;
+      }
+
+      // Own stable branch option
+      if (d.ownStable) {
+        var stableOpt = document.createElement('option');
+        stableOpt.value = 'own-stable';
+        stableOpt.textContent = 'Your stable branch \u2014 ' + d.ownStable.message;
+        sel.appendChild(stableOpt);
+      }
+
+      // Community main option
+      if (d.communityMain) {
+        var mainOpt = document.createElement('option');
+        mainOpt.value = 'community-main';
+        mainOpt.textContent = 'PlainScape Community main \u2014 ' + d.communityMain.message;
+        sel.appendChild(mainOpt);
+      }
+
+      // Separator + live branch commits
+      if (d.commits && d.commits.length > 0) {
+        var sep = document.createElement('option');
+        sep.disabled = true;
+        sep.textContent = '\u2500\u2500 ' + (d.liveBranch || 'live') + ' commits \u2500\u2500';
+        sel.appendChild(sep);
+
+        d.commits.forEach(function(c) {
+          var opt = document.createElement('option');
+          opt.value = c.sha;
+          var dt = new Date(c.date);
+          var dateStr = dt.toLocaleDateString() + ' ' + dt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+          opt.textContent = c.sha.substring(0, 7) + ' \u2014 ' + c.message + ' (' + dateStr + ')';
+          sel.appendChild(opt);
+        });
+      }
+
+      btn.disabled = false;
+    });
+  }
+
+  document.getElementById('rollback-btn').addEventListener('click', function() {
+    var sel = document.getElementById('rollback-select');
+    var target = sel.value;
+    if (!target) return;
+
+    var label = sel.options[sel.selectedIndex].textContent;
+    if (!confirm('Roll back to:\\n\\n' + label + '\\n\\nThis will force-push to your live branch. Continue?')) return;
+
+    var resultEl = document.getElementById('rollback-result');
+    resultEl.textContent = 'Rolling back...';
+    resultEl.style.color = 'var(--text-dim)';
+
+    api('/api/rollback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target: target })
+    }).then(function(d) {
+      if (d && d.ok) {
+        resultEl.textContent = d.message;
+        resultEl.style.color = 'var(--green)';
+        toast('Rollback successful');
+        loadRollbackCommits();
       } else {
         resultEl.textContent = (d && d.error) || 'Failed';
         resultEl.style.color = 'var(--danger)';
@@ -7331,7 +7435,7 @@ function startAdminConsole(world2) {
           { key: "SERVER_HOST", label: "Public IP", value: envMap["SERVER_HOST"] || "", placeholder: "Auto-detected", category: "Registry", type: "text", hint: "Your public IP for the server browser. Auto-detected if empty." },
           { key: "ADMIN_PORT", label: "Admin Console Port", value: envMap["ADMIN_PORT"] || "4801", placeholder: "4801", category: "Admin", type: "number" },
           { key: "GITHUB_TOKEN", label: "GitHub Token", value: envMap["GITHUB_TOKEN"] ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" : "", placeholder: "ghp_...", category: "Git", type: "secret", hint: "GitHub PAT for pushing rule code changes" },
-          { key: "GITHUB_REPO", label: "GitHub Repo", value: envMap["GITHUB_REPO"] || "", placeholder: "owner/repo", category: "Git", type: "text", hint: "GitHub repo for rule pushes (e.g. chvolk/PlainScape-Community)" }
+          { key: "GITHUB_REPO", label: "GitHub Repo", value: envMap["GITHUB_REPO"] || "", placeholder: "owner/repo", category: "Git", type: "text", hint: "Repo for rule code pushes. Use your own fork to keep changes separate. Branches: community/{server-code}/live and /stable." }
         ];
         json(res, { config });
         return;
@@ -7594,6 +7698,120 @@ ${newLine}
         } catch (e) {
           console.error("[AdminConsole] Promote to stable failed:", e);
           err(res, "Failed to promote \u2014 check git credentials", 500);
+        }
+        return;
+      }
+      if (url.pathname === "/api/rollback-commits" && method === "GET") {
+        const token = process.env.GITHUB_TOKEN;
+        const repo = process.env.GITHUB_REPO || "chvolk/PlainScape-Community";
+        const code = process.env.SERVER_CODE;
+        if (!token) {
+          err(res, "GITHUB_TOKEN required");
+          return;
+        }
+        if (!code || !/^[a-z0-9]{6}$/.test(code)) {
+          err(res, "No valid SERVER_CODE \u2014 register with the main server first");
+          return;
+        }
+        if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) {
+          err(res, "Invalid GITHUB_REPO format");
+          return;
+        }
+        const liveBranch = `community/${code}/live`;
+        const ghHeaders = {
+          "Authorization": `token ${token}`,
+          "Accept": "application/vnd.github.v3+json",
+          "User-Agent": "PlainScape-Admin"
+        };
+        try {
+          const commitsRes = await fetch(
+            `https://api.github.com/repos/${repo}/commits?sha=${encodeURIComponent(liveBranch)}&per_page=20`,
+            { headers: ghHeaders }
+          );
+          const commitsData = commitsRes.ok ? await commitsRes.json() : [];
+          const ownStableBranch = `community/${code}/stable`;
+          const ownStableRes = await fetch(
+            `https://api.github.com/repos/${repo}/commits/${encodeURIComponent(ownStableBranch)}`,
+            { headers: ghHeaders }
+          );
+          const ownStableData = ownStableRes.ok ? await ownStableRes.json() : null;
+          const communityMainRes = await fetch(
+            `https://api.github.com/repos/chvolk/PlainScape-Community/commits/main`,
+            { headers: ghHeaders }
+          );
+          const communityMainData = communityMainRes.ok ? await communityMainRes.json() : null;
+          json(res, {
+            commits: Array.isArray(commitsData) ? commitsData.map((c) => ({
+              sha: c.sha,
+              message: (c.commit?.message || "").split("\n")[0],
+              date: c.commit?.author?.date || ""
+            })) : [],
+            ownStable: ownStableData ? {
+              sha: ownStableData.sha,
+              message: (ownStableData.commit?.message || "").split("\n")[0],
+              date: ownStableData.commit?.author?.date || ""
+            } : null,
+            communityMain: communityMainData ? {
+              sha: communityMainData.sha,
+              message: (communityMainData.commit?.message || "").split("\n")[0],
+              date: communityMainData.commit?.author?.date || ""
+            } : null,
+            repo,
+            liveBranch
+          });
+        } catch (e) {
+          console.error("[AdminConsole] Failed to fetch rollback commits:", e);
+          err(res, "Failed to fetch commits from GitHub", 500);
+        }
+        return;
+      }
+      if (url.pathname === "/api/rollback" && method === "POST") {
+        const body = parseJson(await readBody(req));
+        if (!body || !body.target) {
+          err(res, "Missing target");
+          return;
+        }
+        const token = process.env.GITHUB_TOKEN;
+        const repo = process.env.GITHUB_REPO || "chvolk/PlainScape-Community";
+        const code = process.env.SERVER_CODE;
+        if (!token) {
+          err(res, "GITHUB_TOKEN required");
+          return;
+        }
+        if (!code || !/^[a-z0-9]{6}$/.test(code)) {
+          err(res, "No valid SERVER_CODE");
+          return;
+        }
+        if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) {
+          err(res, "Invalid GITHUB_REPO format");
+          return;
+        }
+        const liveBranch = `community/${code}/live`;
+        const remoteUrl = `https://x-access-token:${token}@github.com/${repo}.git`;
+        try {
+          if (body.target === "own-stable") {
+            const stableBranch = `community/${code}/stable`;
+            execSync4(`git fetch ${remoteUrl} ${stableBranch}`, { cwd: PROJECT_ROOT5, stdio: "pipe", timeout: 3e4 });
+            execSync4(`git push ${remoteUrl} FETCH_HEAD:${liveBranch} --force`, { cwd: PROJECT_ROOT5, stdio: "pipe", timeout: 15e3 });
+            json(res, { ok: true, message: `Rolled back to your stable branch` });
+          } else if (body.target === "community-main") {
+            const communityUrl = `https://x-access-token:${token}@github.com/chvolk/PlainScape-Community.git`;
+            execSync4(`git fetch ${communityUrl} main`, { cwd: PROJECT_ROOT5, stdio: "pipe", timeout: 3e4 });
+            execSync4(`git push ${remoteUrl} FETCH_HEAD:${liveBranch} --force`, { cwd: PROJECT_ROOT5, stdio: "pipe", timeout: 15e3 });
+            json(res, { ok: true, message: `Rolled back to PlainScape Community main` });
+          } else {
+            const sha = body.target;
+            if (!/^[a-f0-9]{40}$/.test(sha)) {
+              err(res, "Invalid commit SHA");
+              return;
+            }
+            execSync4(`git fetch ${remoteUrl} ${liveBranch}`, { cwd: PROJECT_ROOT5, stdio: "pipe", timeout: 3e4 });
+            execSync4(`git push ${remoteUrl} ${sha}:refs/heads/${liveBranch} --force`, { cwd: PROJECT_ROOT5, stdio: "pipe", timeout: 15e3 });
+            json(res, { ok: true, message: `Rolled back to ${sha.substring(0, 7)}` });
+          }
+        } catch (e) {
+          console.error("[AdminConsole] Rollback failed:", e);
+          err(res, "Rollback failed \u2014 check git credentials and server code", 500);
         }
         return;
       }
