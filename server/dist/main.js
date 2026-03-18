@@ -6532,6 +6532,9 @@ function appHtml(serverName) {
       <button class="nav-item" data-tab="modding">
         <span class="nav-icon">&#9881;</span> Modding
       </button>
+      <button class="nav-item" data-tab="commands">
+        <span class="nav-icon">&#9654;</span> Commands
+      </button>
     </div>
     <div class="sidebar-footer">
       <div class="server-status">
@@ -6548,6 +6551,7 @@ function appHtml(serverName) {
       <div class="page-desc">Server overview and status</div>
       <div class="stats-row" id="stats-row"></div>
       <div class="stat-checks" id="stat-checks"></div>
+      <div id="version-check" style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border);"></div>
       <div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border);display:flex;gap:12px;">
         <button class="btn btn-danger" id="restart-btn">Restart Server</button>
       </div>
@@ -6656,6 +6660,48 @@ function appHtml(serverName) {
         <div id="rollback-result" style="margin-top:8px;font-size:13px;"></div>
       </div>
     </div>
+
+    <!-- Commands -->
+    <div class="panel" id="panel-commands">
+      <div class="page-title">Admin Commands</div>
+      <div class="page-desc">In-game chat commands available to server admins. Type these in the chat box (Enter key).</div>
+
+      <div class="config-group">
+        <div class="config-group-title">Admin Commands</div>
+        <table>
+          <thead><tr><th>Command</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/source &lt;amount&gt;</td><td>Add source currency to yourself</td></tr>
+            <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/grantrule &lt;username&gt;</td><td>Grant rule submission prompt to an online player</td></tr>
+            <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/rule</td><td>Open the rule submission prompt for yourself</td></tr>
+            <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/clearrules</td><td>Clear all active game rules</td></tr>
+            <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/clearsuggestions</td><td>Clear all player-submitted rule suggestions</td></tr>
+            <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/notice &lt;text&gt;</td><td>Add an admin notice to the safe zone sign</td></tr>
+            <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/clearnotices</td><td>Remove all admin notices</td></tr>
+            <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/dawn</td><td>Force time to dawn phase</td></tr>
+            <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/day</td><td>Force time to day phase</td></tr>
+            <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/dusk</td><td>Force time to dusk phase</td></tr>
+            <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/night</td><td>Force time to night phase</td></tr>
+            <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/autotime</td><td>Resume natural real-clock day/night cycle</td></tr>
+            <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/stag spawn</td><td>Spawn the Scorched Stag world boss</td></tr>
+            <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/stag kill</td><td>Remove the Scorched Stag (no reward)</td></tr>
+            <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/freeuser &lt;username&gt;</td><td>Release a username reservation (kicks if online)</td></tr>
+            <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/shutdown</td><td>Gracefully stop the server</td></tr>
+            <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/commands</td><td>List all available commands in chat</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="config-group">
+        <div class="config-group-title">All Players</div>
+        <table>
+          <thead><tr><th>Command</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/w &lt;username&gt; &lt;message&gt;</td><td>Send a private whisper to another player</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </main>
 </div>
 
@@ -6743,6 +6789,85 @@ function appHtml(serverName) {
       // Sidebar player count
       document.getElementById('sidebar-player-count').textContent =
         d.playerCount + ' player' + (d.playerCount !== 1 ? 's' : '') + ' online';
+    });
+
+    // Version check
+    api('/api/version-check').then(function(d) {
+      var wrap = document.getElementById('version-check');
+      if (!d || !d.latest) {
+        wrap.textContent = '';
+        var info = document.createElement('div');
+        info.style.cssText = 'font-size:13px;color:var(--text-dim);';
+        info.textContent = 'v' + (d && d.current || '?') + ' \u2014 could not check for updates';
+        wrap.appendChild(info);
+        return;
+      }
+
+      wrap.textContent = '';
+      var vLine = document.createElement('div');
+      vLine.style.cssText = 'font-size:13px;margin-bottom:8px;';
+
+      if (d.updateAvailable) {
+        vLine.style.color = 'var(--amber)';
+        vLine.textContent = 'Update available: v' + d.current + ' \u2192 v' + d.latest;
+
+        var changeWrap = document.createElement('details');
+        changeWrap.className = 'builtin-rules';
+        changeWrap.style.marginTop = '8px';
+        var summary = document.createElement('summary');
+        summary.textContent = 'What\\'s new in v' + d.latest;
+        changeWrap.appendChild(summary);
+        var changeBody = document.createElement('div');
+        changeBody.className = 'builtin-rules-content';
+        changeBody.style.whiteSpace = 'pre-wrap';
+        changeBody.textContent = d.changelog || 'No changelog available.';
+        changeWrap.appendChild(changeBody);
+
+        var btnRow = document.createElement('div');
+        btnRow.style.cssText = 'display:flex;gap:12px;margin-top:10px;';
+
+        var updateBtn = document.createElement('button');
+        updateBtn.className = 'btn btn-primary';
+        updateBtn.textContent = 'Update to v' + d.latest;
+        updateBtn.addEventListener('click', function() {
+          if (!confirm('Update to v' + d.latest + '? This will pull the latest PlainScape Community release to your live branch and restart.')) return;
+          updateBtn.disabled = true;
+          updateBtn.textContent = 'Updating...';
+          api('/api/rollback', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target: 'community-main' })
+          }).then(function(r) {
+            if (r && r.ok) {
+              toast('Updated to v' + d.latest + ' \u2014 restart to apply');
+              updateBtn.textContent = 'Updated \u2014 restart server';
+              updateBtn.disabled = false;
+              updateBtn.className = 'btn btn-danger';
+              updateBtn.onclick = function() { api('/api/restart', { method: 'POST' }); };
+            } else {
+              toast((r && r.error) || 'Update failed', 'error');
+              updateBtn.textContent = 'Update failed';
+            }
+          });
+        });
+
+        var relLink = document.createElement('a');
+        relLink.href = d.releaseUrl;
+        relLink.target = '_blank';
+        relLink.className = 'btn btn-ghost';
+        relLink.textContent = 'View release';
+        relLink.style.textDecoration = 'none';
+
+        btnRow.appendChild(updateBtn);
+        btnRow.appendChild(relLink);
+        wrap.appendChild(vLine);
+        wrap.appendChild(changeWrap);
+        wrap.appendChild(btnRow);
+      } else {
+        vLine.style.color = 'var(--green)';
+        vLine.textContent = 'v' + d.current + ' \u2014 up to date';
+        wrap.appendChild(vLine);
+      }
     });
   }
 
@@ -7394,6 +7519,35 @@ function startAdminConsole(world2) {
       if (url.pathname === "/" || url.pathname === "") {
         res.writeHead(200, { "Content-Type": "text/html" });
         res.end(adminPageHtml(process.env.SERVER_NAME || "PlainScape Server", false));
+        return;
+      }
+      if (url.pathname === "/api/version-check" && method === "GET") {
+        try {
+          let currentVersion = "0.0.0";
+          try {
+            const pkg = JSON.parse(fs3.readFileSync(path6.resolve(PROJECT_ROOT5, "package.json"), "utf-8"));
+            currentVersion = pkg.version || "0.0.0";
+          } catch {
+          }
+          const ghRes = await fetch("https://api.github.com/repos/chvolk/PlainScape-Community/releases/latest", {
+            headers: { "Accept": "application/vnd.github.v3+json", "User-Agent": "PlainScape-Admin" }
+          });
+          if (!ghRes.ok) {
+            json(res, { current: currentVersion, latest: null, error: "Failed to check GitHub" });
+            return;
+          }
+          const release = await ghRes.json();
+          const latestVersion = (release.tag_name || "").replace(/^v/, "");
+          json(res, {
+            current: currentVersion,
+            latest: latestVersion,
+            updateAvailable: latestVersion !== currentVersion,
+            changelog: release.body || "",
+            releaseUrl: release.html_url || ""
+          });
+        } catch (e) {
+          json(res, { current: "0.0.0", latest: null, error: "Version check failed" });
+        }
         return;
       }
       if (url.pathname === "/api/status" && method === "GET") {

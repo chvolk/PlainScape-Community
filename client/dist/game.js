@@ -3321,9 +3321,9 @@ function drawBuildings(ctx, state2, mouseWorldX, mouseWorldY) {
     const tw = ctx.measureText(text).width;
     const px = 4, py = 2;
     ctx.fillStyle = "rgba(0,0,0,0.7)";
-    ctx.fillRect(-tw / 2 - px, -CELL_SIZE / 2 - 16 - py, tw + px * 2, 12 + py * 2);
+    ctx.fillRect(-tw / 2 - px, CELL_SIZE / 2 + 2, tw + px * 2, 12 + py * 2);
     ctx.fillStyle = "#fff";
-    ctx.fillText(text, 0, -CELL_SIZE / 2 - 8);
+    ctx.fillText(text, 0, CELL_SIZE / 2 + 12);
     ctx.restore();
   }
 }
