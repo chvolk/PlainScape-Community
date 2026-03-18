@@ -177,8 +177,8 @@ var STAT_MAX_LEVEL = 25;
 var STAT_INCREMENTS = {
   moveSpeed: 4,
   // +4 units/sec per level (base 150)
-  meleeCooldown: -15,
-  // -15ms per level (base 500ms) — negative = faster
+  knockback: 5,
+  // +5 units per level (base 20)
   meleeRange: 2,
   // +2 units per level (base 52)
   projectileSpeed: 6,
@@ -191,21 +191,18 @@ var STAT_INCREMENTS = {
   // +4 units per level (base 160)
   shieldDuration: 300,
   // +300ms per level (base 2000ms)
-  knockback: 5,
-  // +5 units per level (base 20)
   dashDist: 3.2
   // +3.2 units per level (base 64) — +80 at max = ~2.5 tiles
 };
 var STAT_NAMES = [
   "moveSpeed",
-  "meleeCooldown",
+  "knockback",
   "meleeRange",
   "projectileSpeed",
   "projectileTtl",
   "lungeAoe",
   "lungeDist",
   "shieldDuration",
-  "knockback",
   "dashDist"
 ];
 var MAX_PARTY_SIZE = 10;
@@ -219,14 +216,13 @@ var DEFAULT_MAX_PLAYERS = 100;
 function defaultStatLevels() {
   return {
     moveSpeed: 0,
-    meleeCooldown: 0,
+    knockback: 0,
     meleeRange: 0,
     projectileSpeed: 0,
     projectileTtl: 0,
     lungeAoe: 0,
     lungeDist: 0,
     shieldDuration: 0,
-    knockback: 0,
     dashDist: 0
   };
 }
@@ -1137,8 +1133,7 @@ function tickCombat(world2) {
     if (player.pendingPunch !== null && now >= player.punchCooldownUntil) {
       const punchRange = PUNCH_RANGE + player.statLevels.meleeRange * STAT_INCREMENTS.meleeRange;
       performConeAttack(world2, player, player.pendingPunch, PUNCH_DAMAGE, punchRange);
-      const punchCd = Math.max(50, PUNCH_COOLDOWN + player.statLevels.meleeCooldown * STAT_INCREMENTS.meleeCooldown);
-      player.punchCooldownUntil = now + punchCd;
+      player.punchCooldownUntil = now + PUNCH_COOLDOWN;
       player.anim = "punch";
       player.pendingPunch = null;
     }

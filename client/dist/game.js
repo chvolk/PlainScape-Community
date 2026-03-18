@@ -93,26 +93,24 @@ var STAT_LEVEL_COST = 100;
 var STAT_MAX_LEVEL = 25;
 var STAT_NAMES = [
   "moveSpeed",
-  "meleeCooldown",
+  "knockback",
   "meleeRange",
   "projectileSpeed",
   "projectileTtl",
   "lungeAoe",
   "lungeDist",
   "shieldDuration",
-  "knockback",
   "dashDist"
 ];
 var STAT_DISPLAY_NAMES = {
   moveSpeed: "Move Speed",
-  meleeCooldown: "Melee Speed",
+  knockback: "Melee Knockback",
   meleeRange: "Melee Range",
   projectileSpeed: "Projectile Speed",
   projectileTtl: "Projectile Range",
   lungeAoe: "Lunge AOE",
   lungeDist: "Lunge Distance",
   shieldDuration: "Shield Duration",
-  knockback: "Knockback",
   dashDist: "Dash Distance"
 };
 var SIGN_RANGE = 80;
@@ -124,14 +122,13 @@ var NOTICES_SIGN_POS = { x: 0, y: 236 };
 function defaultStatLevels() {
   return {
     moveSpeed: 0,
-    meleeCooldown: 0,
+    knockback: 0,
     meleeRange: 0,
     projectileSpeed: 0,
     projectileTtl: 0,
     lungeAoe: 0,
     lungeDist: 0,
     shieldDuration: 0,
-    knockback: 0,
     dashDist: 0
   };
 }
@@ -5817,7 +5814,6 @@ var PAGE_SIZE = 6;
 var currentPage = 0;
 var searchQuery = "";
 var allServers = [];
-var clientPings = /* @__PURE__ */ new Map();
 function setupServerBrowser(onServerSelected, preGameNav2) {
   preGameNavRef = preGameNav2 ?? null;
   onSelect = onServerSelected;
@@ -5882,44 +5878,12 @@ async function fetchServers() {
     const servers = await res.json();
     allServers = servers;
     renderServerList(servers);
-    pingAllServers(servers);
   } catch {
   } finally {
     if (refreshBtn) {
       setTimeout(() => refreshBtn.classList.remove("spinning"), 600);
     }
   }
-}
-function pingAllServers(servers) {
-  for (const server of servers) {
-    if (isMainServer(server)) continue;
-    const key = `${server.host}:${server.port}`;
-    pingServer(server.host, server.port).then((ms) => {
-      clientPings.set(key, ms);
-      renderServerList(allServers);
-    });
-  }
-}
-function pingServer(host, port) {
-  return new Promise((resolve) => {
-    const start = performance.now();
-    const ws = new WebSocket(`ws://${host}:${port}`);
-    const timer = setTimeout(() => {
-      ws.close();
-      resolve(-1);
-    }, 3e3);
-    ws.addEventListener("open", () => {
-      clearTimeout(timer);
-      const ms = Math.round(performance.now() - start);
-      ws.close();
-      resolve(ms);
-    });
-    ws.addEventListener("error", () => {
-      clearTimeout(timer);
-      ws.close();
-      resolve(-1);
-    });
-  });
 }
 function openCommunityServer(url) {
   window.location.href = url;
@@ -5969,27 +5933,6 @@ function renderServerList(servers) {
       modCell.appendChild(badge);
     }
     row.appendChild(modCell);
-    const pingCell = document.createElement("td");
-    pingCell.style.textAlign = "center";
-    if (isMainServer(server)) {
-      pingCell.textContent = "\u2014";
-    } else {
-      const key = `${server.host}:${server.port}`;
-      const ping = clientPings.get(key);
-      if (ping === void 0) {
-        pingCell.textContent = "...";
-        pingCell.style.color = "#666";
-      } else if (ping < 0) {
-        pingCell.textContent = "\u2715";
-        pingCell.style.color = "#a44";
-      } else {
-        pingCell.textContent = `${ping}ms`;
-        if (ping < 80) pingCell.style.color = "#7ec87e";
-        else if (ping < 150) pingCell.style.color = "#c9a84c";
-        else pingCell.style.color = "#c44";
-      }
-    }
-    row.appendChild(pingCell);
     const descCell = document.createElement("td");
     descCell.textContent = server.description;
     row.appendChild(descCell);
