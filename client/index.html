@@ -1,0 +1,2940 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
+  <title>PlainScape</title>
+  <meta name="description" content="Survive the plains. Change the plains. A browser based MMO where the daily champion gets to add a new rule to the game using AI.">
+
+  <!-- Open Graph (Slack, Discord, etc.) -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="PlainScape">
+  <meta property="og:description" content="Survive the plains. Change the plains. A browser based MMO where the daily champion gets to add a new rule to the game using AI.">
+  <meta property="og:image" content="https://plainscape.world/logo.png">
+  <meta property="og:url" content="https://plainscape.world">
+
+  <!-- Twitter/X Card -->
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="PlainScape">
+  <meta name="twitter:description" content="Survive the plains. Change the plains. A browser based MMO where the daily champion gets to add a new rule to the game using AI.">
+  <meta name="twitter:image" content="https://plainscape.world/logo.png">
+
+  <!-- Discord -->
+  <meta name="theme-color" content="#7ec87e">
+
+  <link rel="icon" type="image/png" href="/logo.png">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/logo.png">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #1a1a2e;
+      color: #eee;
+      font-family: 'Segoe UI', sans-serif;
+      height: 100vh;
+    }
+    body.in-game {
+      overflow: hidden;
+    }
+
+    /* ── Join Screen ─────────────────────────────────── */
+    #join-screen {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      gap: 16px;
+    }
+    .logo-lockup {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+    .logo-lockup img {
+      width: 96px;
+      height: 96px;
+      filter: drop-shadow(0 0 24px rgba(76, 155, 76, 0.4));
+      animation: logoFloat 3s ease-in-out infinite;
+    }
+    @keyframes logoFloat {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-6px); }
+    }
+    #join-screen h1 {
+      font-size: 48px;
+      color: #7ec87e;
+      text-shadow: 0 0 20px rgba(126,200,126,0.3);
+      letter-spacing: 4px;
+      margin: 0;
+    }
+    #join-screen .subtitle {
+      color: #888;
+      font-size: 14px;
+    }
+    .join-form {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      background: rgba(255,255,255,0.05);
+      padding: 32px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .join-form input[type="text"],
+    .join-form input[type="password"] {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #fff;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 16px;
+      outline: none;
+      width: 260px;
+      touch-action: manipulation;
+      -webkit-user-select: text;
+      user-select: text;
+    }
+    .join-form input[type="text"]:focus,
+    .join-form input[type="password"]:focus {
+      border-color: #7ec87e;
+    }
+    .color-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 6px;
+      padding: 4px 10px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .color-row:hover {
+      background: rgba(255,255,255,0.1);
+      border-color: rgba(255,255,255,0.2);
+    }
+    .color-row span {
+      font-size: 13px;
+      color: #aaa;
+      flex: 1;
+    }
+    .custom-color-btn {
+      width: 36px;
+      height: 24px;
+      border: 2px solid rgba(255,255,255,0.2);
+      border-radius: 4px;
+      cursor: pointer;
+      padding: 0;
+      flex-shrink: 0;
+      transition: border-color 0.2s;
+    }
+    .custom-color-btn:hover, .custom-color-btn.gp-focus {
+      border-color: rgba(255,255,255,0.6);
+    }
+    .color-picker-row {
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+      gap: 16px;
+    }
+    .color-pickers {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex: 1;
+      max-width: 130px;
+    }
+    #randomize-btn {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: #7a7a7a;
+      flex: 1;
+      max-width: 130px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+    #randomize-btn:hover {
+      background: rgba(126,200,126,0.12);
+      border-color: rgba(126,200,126,0.35);
+      color: #7ec87e;
+    }
+    #randomize-btn:active {
+      transform: scale(0.95);
+    }
+    .preview-char {
+      width: 80px;
+      height: 100px;
+      margin: 0 auto;
+    }
+    #play-btn {
+      background: #7ec87e;
+      color: #1a1a2e;
+      border: none;
+      padding: 14px 32px;
+      border-radius: 8px;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    #play-btn:hover { background: #9ed89e; }
+    #play-btn:disabled { background: #555; cursor: not-allowed; }
+    .error-msg {
+      color: #ff6b6b;
+      font-size: 14px;
+      text-align: center;
+      min-height: 20px;
+    }
+
+    /* ── Game Screen ─────────────────────────────────── */
+    #game-screen { display: none; position: relative; }
+    #game-canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      will-change: contents; /* hint browser to use GPU compositing */
+      cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Ccircle cx='12' cy='12' r='4' fill='none' stroke='%23ffffffaa' stroke-width='1'/%3E%3Cline x1='12' y1='4' x2='12' y2='9' stroke='%23ffffffaa' stroke-width='1.5'/%3E%3Cline x1='12' y1='15' x2='12' y2='20' stroke='%23ffffffaa' stroke-width='1.5'/%3E%3Cline x1='4' y1='12' x2='9' y2='12' stroke='%23ffffffaa' stroke-width='1.5'/%3E%3Cline x1='15' y1='12' x2='20' y2='12' stroke='%23ffffffaa' stroke-width='1.5'/%3E%3C/svg%3E") 12 12, crosshair;
+    }
+
+    /* ── HUD ──────────────────────────────────────────── */
+    #hud {
+      display: none;
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      padding: 12px 20px;
+      pointer-events: none;
+    }
+    #hud > * { pointer-events: auto; }
+    .hud-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+    .hud-left {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      background: rgba(0,0,0,0.5);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      padding: 10px 14px;
+    }
+    .hp-bar-outer {
+      width: 200px;
+      height: 20px;
+      background: rgba(0,0,0,0.5);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .hp-bar-inner {
+      height: 100%;
+      background: #e74c3c;
+      transition: width 0.15s;
+    }
+    .source-display {
+      font-size: 18px;
+      color: #f0c040;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+    }
+    .phase-display {
+      font-size: 14px;
+      color: #aaa;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+    }
+    .coords-display {
+      font-size: 12px;
+      color: #777;
+    }
+
+    /* ── Global Whitelist ─────────────────────────────── */
+    #gwl-btn {
+      margin-top: 4px;
+      background: rgba(0,0,0,0.5);
+      border: 1px solid rgba(255,255,255,0.15);
+      color: #ccc;
+      padding: 5px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 11px;
+      pointer-events: auto;
+      align-self: flex-start;
+    }
+    #gwl-btn:hover { background: rgba(255,255,255,0.1); }
+    #gwl-modal {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 160;
+      align-items: center;
+      justify-content: center;
+    }
+    #gwl-modal.open { display: flex; }
+    .gwl-inner {
+      background: rgba(30,30,50,0.97);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 12px;
+      padding: 24px 32px;
+      min-width: 300px;
+      max-width: 380px;
+    }
+    .gwl-inner h2 {
+      color: #f0c040;
+      font-size: 18px;
+      text-align: center;
+      margin-bottom: 8px;
+    }
+    .gwl-desc {
+      font-size: 12px;
+      color: #888;
+      text-align: center;
+      margin-bottom: 14px;
+    }
+    .gwl-slot {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+    .gwl-slot span {
+      color: #888;
+      font-size: 12px;
+      width: 22px;
+      text-align: right;
+    }
+    .gwl-slot input {
+      flex: 1;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15);
+      color: #eee;
+      padding: 5px 8px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    .gwl-slot input:focus { border-color: #f0c040; outline: none; }
+    #gwl-save {
+      margin-top: 12px;
+      background: rgba(126,200,126,0.2);
+      border: 1px solid rgba(126,200,126,0.4);
+      color: #7ec87e;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      width: 100%;
+    }
+    #gwl-save:hover { background: rgba(126,200,126,0.35); }
+    #gwl-close {
+      margin-top: 6px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15);
+      color: #ccc;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      width: 100%;
+    }
+    #gwl-close:hover { background: rgba(255,255,255,0.15); }
+
+    /* ── Leaderboard ─────────────────────────────────── */
+    #leaderboard {
+      position: absolute;
+      top: 12px;
+      right: 20px;
+      background: rgba(0,0,0,0.5);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      width: 190px;
+      pointer-events: auto;
+    }
+    #leaderboard .notif-card-header {
+      padding: 8px 14px;
+    }
+    #leaderboard .notif-card-header span:first-child {
+      color: #f0c040;
+      font-size: 12px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    #lb-entries, #champion-timer {
+      padding: 0 14px;
+    }
+    #lb-entries { padding-top: 0; padding-bottom: 4px; }
+    #champion-timer { padding-bottom: 10px; }
+    #leaderboard.collapsed #lb-entries,
+    #leaderboard.collapsed #champion-timer { display: none; }
+    #champion-timer {
+      font-size: 10px;
+      color: #999;
+      margin-top: 6px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      padding-top: 5px;
+      text-align: center;
+    }
+    #champion-info {
+      font-size: 10px;
+      color: #c0a040;
+      text-align: center;
+      margin-top: 3px;
+      cursor: default;
+    }
+    .lb-entry {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      padding: 2px 0;
+      color: #ccc;
+    }
+    .lb-entry .lb-rank { color: #888; width: 20px; }
+    .lb-entry .lb-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .lb-entry .lb-score { color: #f0c040; margin-left: 8px; }
+    .lb-entry.lb-self .lb-name { color: #7ec87e; }
+
+    /* ── Online List ─────────────────────────────────── */
+    #online-container {
+      position: absolute;
+      top: 12px;
+      right: 220px;
+      width: 150px;
+      pointer-events: auto;
+    }
+    #online-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      max-height: 160px;
+      overflow-y: auto;
+      padding: 4px 8px;
+    }
+    #online-container.collapsed #online-list { display: none; }
+    .online-overflow {
+      font-size: 10px;
+      color: #888;
+      text-align: center;
+      padding: 2px 0;
+      cursor: pointer;
+    }
+    .online-overflow:hover { color: #bbb; }
+    .online-name {
+      font-size: 11px;
+      color: #ccc;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      padding: 1px 0;
+    }
+    .online-name.online-self { color: #7ec87e; }
+    .online-admin { color: #f0c040; font-size: 9px; font-weight: bold; }
+
+    /* ── Build Bar ────────────────────────────────────── */
+    .build-bar {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 8px;
+      background: rgba(0,0,0,0.6);
+      padding: 8px 16px;
+      border-radius: 8px;
+    }
+    .build-btn {
+      background: rgba(255,255,255,0.1);
+      border: 2px solid rgba(255,255,255,0.2);
+      color: #eee;
+      padding: 10px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.15s;
+    }
+    .build-btn:hover { background: rgba(255,255,255,0.2); }
+    .build-btn.active {
+      border-color: #7ec87e;
+      background: rgba(126,200,126,0.2);
+    }
+    .build-btn .cost {
+      color: #f0c040;
+      font-size: 11px;
+    }
+    .build-btn.unaffordable {
+      opacity: 0.4;
+      border-color: rgba(255, 60, 60, 0.4);
+    }
+    .build-btn.unaffordable .cost { color: #e55; }
+    .demolish-btn {
+      background: rgba(255,60,60,0.15) !important;
+      border-color: rgba(255,60,60,0.4) !important;
+      color: #ff4444 !important;
+    }
+    .demolish-btn:hover { background: rgba(255,60,60,0.3) !important; }
+    .demolish-btn.active {
+      border-color: #ff4444 !important;
+      background: rgba(255,60,60,0.35) !important;
+    }
+
+    /* ── Death Overlay ────────────────────────────────── */
+    #death-overlay {
+      display: none;
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(100, 0, 0, 0.4);
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-size: 36px;
+      color: #ff4444;
+    }
+    #death-timer {
+      font-size: 20px;
+      color: #ccc;
+      margin-top: 8px;
+    }
+
+    /* ── Event Feed ────────────────────────────────────── */
+    /* ── Notification Feed (bottom-right, above minimap) */
+    #notif-container {
+      position: absolute;
+      bottom: 190px;
+      right: 16px;
+      width: 260px;
+      pointer-events: auto;
+    }
+    .notif-card {
+      background: rgba(0,0,0,0.45);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .notif-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 5px 10px;
+      cursor: pointer;
+      user-select: none;
+      font-size: 11px;
+      color: #888;
+      background: rgba(0,0,0,0.3);
+    }
+    .notif-card-header:hover { color: #bbb; }
+    .notif-card-toggle { font-size: 10px; }
+    #notification-feed {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      max-height: 120px;
+      overflow-y: auto;
+      padding: 4px 8px;
+    }
+    #notif-container.collapsed #notification-feed { display: none; }
+    .notif-msg {
+      font-size: 11px;
+      color: #aaa;
+      text-align: right;
+      word-wrap: break-word;
+      white-space: normal;
+      padding: 2px 0;
+    }
+    .notif-death { color: #e55; }
+    .notif-join { color: #888; }
+    .notif-petition { color: #c8a040; }
+    .notif-source { color: #7ec87e; }
+    .notif-kill { color: #f0c040; }
+    .notif-local { color: #ccc; }
+    .notif-party { color: #4488ff; }
+    .notif-phase { color: #ffb347; font-style: italic; }
+    .notif-rule { color: #f0c040; font-weight: bold; }
+
+    /* ── Rule Status Indicator ───────────────────────── */
+    #rule-status {
+      display: none;
+      position: absolute;
+      top: 50px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.7);
+      border: 1px solid #f0c040;
+      border-radius: 8px;
+      padding: 10px 20px;
+      color: #f0c040;
+      font-size: 13px;
+      align-items: center;
+      gap: 10px;
+      pointer-events: none;
+      z-index: 100;
+    }
+    #rule-status .spinner {
+      width: 14px; height: 14px;
+      border: 2px solid rgba(240,192,64,0.3);
+      border-top-color: #f0c040;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Chat ─────────────────────────────────────────── */
+    #chat-container {
+      position: absolute;
+      bottom: 70px;
+      left: 20px;
+      width: 320px;
+      pointer-events: auto;
+    }
+    .chat-card {
+      background: rgba(0,0,0,0.45);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .chat-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 5px 10px;
+      cursor: pointer;
+      user-select: none;
+      font-size: 11px;
+      color: #888;
+      background: rgba(0,0,0,0.3);
+    }
+    .chat-card-header:hover { color: #bbb; }
+    .chat-card-toggle { font-size: 10px; }
+    #chat-messages {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      max-height: 100px;
+      overflow-y: auto;
+      padding: 4px 8px;
+    }
+    #chat-container.collapsed #chat-messages,
+    #chat-container.collapsed #chat-input-wrapper { display: none; }
+    .chat-msg {
+      font-size: 12px;
+      color: #ddd;
+      word-wrap: break-word;
+      padding: 1px 0;
+    }
+    .chat-msg .chat-name { color: #7ec87e; font-weight: bold; }
+    .chat-msg.chat-whisper { color: #d8a0f0; font-style: italic; }
+    .chat-msg.chat-whisper .chat-name { color: #c77dff; }
+    .chat-whisper-label { color: #c77dff; font-style: italic; }
+    .chat-msg.chat-history {
+      opacity: 0.8;
+    }
+    #chat-input-wrapper {
+      display: none;
+      padding: 4px 8px 6px;
+    }
+    #chat-input {
+      width: 100%;
+      background: rgba(0,0,0,0.5);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #fff;
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      outline: none;
+    }
+    #chat-input:focus { border-color: #7ec87e; }
+
+    /* ── Party Invite Card (in chat) ─────────────────── */
+    .party-invite-card {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(30,30,80,0.9);
+      border: 1px solid rgba(68,136,255,0.4);
+      padding: 6px 10px;
+      border-radius: 6px;
+      animation: none !important;
+      opacity: 1 !important;
+      pointer-events: auto;
+      color: #ccc;
+    }
+    .party-invite-btn {
+      border: none;
+      color: #fff;
+      padding: 3px 8px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 11px;
+    }
+    .party-invite-accept { background: #4a4; }
+    .party-invite-accept:hover { background: #5b5; }
+    .party-invite-deny { background: #a44; }
+    .party-invite-deny:hover { background: #b55; }
+
+    /* ── Controls Hint ────────────────────────────────── */
+    .controls-hint {
+      position: absolute;
+      bottom: 70px;
+      left: 20px;
+      font-size: 11px;
+      color: #555;
+      display: none;
+    }
+
+    /* ── ESC Menu ──────────────────────────────────────── */
+    #esc-menu {
+      display: none;
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.7);
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    .menu-panel {
+      background: rgba(30,30,50,0.95);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 12px;
+      padding: 32px 48px;
+      max-width: 480px;
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+    .menu-panel h2 {
+      color: #7ec87e;
+      font-size: 24px;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    .menu-panel h3 {
+      color: #f0c040;
+      font-size: 16px;
+      margin-top: 24px;
+      margin-bottom: 12px;
+    }
+    .controls-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .controls-table td {
+      padding: 6px 12px;
+      font-size: 14px;
+    }
+    .controls-table td:first-child {
+      color: #f0c040;
+      font-weight: bold;
+      text-align: right;
+      white-space: nowrap;
+    }
+    .controls-table td:last-child {
+      color: #ccc;
+    }
+    .controls-table tr + tr td {
+      border-top: 1px solid rgba(255,255,255,0.06);
+    }
+    .menu-divider {
+      border: none;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      margin: 20px 0;
+    }
+    #rules-list {
+      list-style: none;
+    }
+    #rules-list li {
+      font-size: 13px;
+      color: #ccc;
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    #rules-list li .rule-author {
+      color: #7ec87e;
+      font-size: 11px;
+    }
+    #rules-list .no-rules {
+      color: #666;
+      font-style: italic;
+    }
+    .censor-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 16px;
+      font-size: 13px;
+      color: #aaa;
+    }
+    .censor-toggle input { cursor: pointer; }
+    #close-menu {
+      display: block;
+      margin: 24px auto 0;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #eee;
+      padding: 10px 32px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    #close-menu:hover { background: rgba(255,255,255,0.2); }
+    .logout-btn {
+      display: block;
+      margin: 8px auto 0;
+      background: rgba(255,60,60,0.15);
+      border: 1px solid rgba(255,60,60,0.4);
+      color: #ff4444;
+      padding: 10px 32px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .logout-btn:hover { background: rgba(255,60,60,0.3); }
+
+    /* ── Controller Config ─────────────────────────── */
+    .controller-btn {
+      display: block;
+      margin: 8px auto 0;
+      background: rgba(100,150,255,0.15);
+      border: 1px solid rgba(100,150,255,0.4);
+      color: #6496ff;
+      padding: 10px 32px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .controller-btn:hover { background: rgba(100,150,255,0.3); }
+    #controller-modal {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.8);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+    }
+    #controller-modal.open { display: flex; }
+    .controller-inner {
+      background: rgba(30,30,50,0.97);
+      border: 1px solid rgba(100,150,255,0.3);
+      border-radius: 12px;
+      padding: 24px 32px;
+      min-width: 320px;
+      max-width: 420px;
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+    .controller-inner h2 {
+      color: #6496ff;
+      font-size: 18px;
+      text-align: center;
+      margin-bottom: 4px;
+    }
+    .controller-status {
+      text-align: center;
+      font-size: 11px;
+      color: #888;
+      margin-bottom: 12px;
+    }
+    .controller-status.connected { color: #7ec87e; }
+    .controller-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .controller-row:last-child { border-bottom: none; }
+    .controller-action { font-size: 13px; color: #ccc; }
+    .controller-bind-btn {
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15);
+      color: #f0c040;
+      padding: 4px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      min-width: 80px;
+      text-align: center;
+    }
+    .controller-bind-btn:hover { background: rgba(255,255,255,0.15); }
+    .controller-bind-btn.listening {
+      border-color: #f0c040;
+      color: #fff;
+      animation: statsPulse 1s ease-in-out infinite;
+    }
+    .controller-reset {
+      display: block;
+      margin: 12px auto 0;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15);
+      color: #ccc;
+      padding: 8px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .controller-reset:hover { background: rgba(255,255,255,0.15); }
+    .controller-close {
+      display: block;
+      margin: 8px auto 0;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #eee;
+      padding: 8px 24px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .controller-close:hover { background: rgba(255,255,255,0.2); }
+
+    /* ── Gamepad Menu Navigation ─────────────────────── */
+    .gp-focus {
+      outline: 2px solid #f0c040 !important;
+      outline-offset: 2px;
+      background: rgba(240, 192, 64, 0.15) !important;
+      border-radius: 4px;
+    }
+    /* Input fields get a subtler highlight */
+    input.gp-focus {
+      outline: 2px solid #4a9eff !important;
+      background: rgba(74, 158, 255, 0.1) !important;
+    }
+
+    /* ── How to Play ──────────────────────────────────── */
+    .htp-btn {
+      display: block;
+      margin: 12px auto 0;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #eee;
+      padding: 10px 32px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .htp-btn:hover { background: rgba(255,255,255,0.2); }
+    #htp-modal {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.8);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+    }
+    #htp-modal.open { display: flex; }
+    .htp-panel {
+      background: rgba(30,30,50,0.97);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 12px;
+      padding: 32px 40px;
+      max-width: 640px;
+      width: 90vw;
+      max-height: 85vh;
+      overflow-y: auto;
+      color: #ddd;
+    }
+    .htp-panel h2 {
+      color: #7ec87e;
+      font-size: 22px;
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .htp-panel h3 {
+      color: #f0c040;
+      font-size: 15px;
+      margin: 20px 0 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      padding-bottom: 4px;
+    }
+    .htp-panel p {
+      font-size: 13px;
+      line-height: 1.6;
+      margin-bottom: 8px;
+      color: #bbb;
+    }
+    .htp-controls {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .htp-controls td {
+      padding: 5px 10px;
+      font-size: 13px;
+    }
+    .htp-controls td:first-child {
+      color: #f0c040;
+      font-weight: bold;
+      text-align: right;
+      white-space: nowrap;
+      width: 130px;
+    }
+    .htp-controls td:last-child { color: #ccc; }
+    .htp-controls tr + tr td { border-top: 1px solid rgba(255,255,255,0.05); }
+    .htp-entry {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      margin-bottom: 12px;
+      padding: 8px 10px;
+      background: rgba(255,255,255,0.03);
+      border-radius: 6px;
+    }
+    .htp-icon {
+      flex-shrink: 0;
+      width: 40px;
+      height: 40px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+    }
+    .htp-entry-text { flex: 1; }
+    .htp-entry-text strong {
+      color: #eee;
+      font-size: 14px;
+    }
+    .htp-entry-text span {
+      display: block;
+      font-size: 12px;
+      color: #aaa;
+      margin-top: 2px;
+    }
+    .htp-close {
+      display: block;
+      margin: 20px auto 0;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #eee;
+      padding: 10px 40px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .htp-close:hover { background: rgba(255,255,255,0.2); }
+
+    /* ── Winner Modal ─────────────────────────────────── */
+    #winner-modal {
+      display: none;
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.8);
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 200;
+    }
+    .winner-panel {
+      background: rgba(30,30,50,0.95);
+      border: 2px solid #f0c040;
+      border-radius: 12px;
+      padding: 32px 48px;
+      max-width: 460px;
+      text-align: center;
+    }
+    .winner-panel h2 {
+      color: #f0c040;
+      font-size: 28px;
+      margin-bottom: 12px;
+    }
+    .winner-panel p {
+      color: #ccc;
+      font-size: 14px;
+      margin-bottom: 20px;
+      line-height: 1.6;
+    }
+    #rule-input {
+      width: 100%;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #fff;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      outline: none;
+      resize: vertical;
+      min-height: 60px;
+      max-height: 120px;
+      font-family: inherit;
+    }
+    #rule-input:focus { border-color: #f0c040; }
+    #submit-rule {
+      margin-top: 16px;
+      background: #f0c040;
+      color: #1a1a2e;
+      border: none;
+      padding: 12px 32px;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    #submit-rule:hover { background: #f5d060; }
+    #submit-rule:disabled { background: #555; cursor: not-allowed; }
+    .winner-status {
+      color: #888;
+      font-size: 12px;
+      margin-top: 8px;
+      min-height: 18px;
+    }
+
+    /* ── Stats Panel ──────────────────────────────────── */
+    #stats-btn {
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.6);
+      border: 1px solid rgba(240,192,64,0.4);
+      color: #f0c040;
+      padding: 6px 18px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: bold;
+      cursor: pointer;
+      pointer-events: auto;
+      z-index: 10;
+    }
+    #stats-btn:hover { background: rgba(240,192,64,0.15); }
+    #stats-btn.can-upgrade {
+      animation: statsPulse 1.5s ease-in-out infinite;
+    }
+    @keyframes statsPulse {
+      0%, 100% { box-shadow: 0 0 4px rgba(240,192,64,0.2); }
+      50% { box-shadow: 0 0 14px rgba(240,192,64,0.6); border-color: rgba(240,192,64,0.8); }
+    }
+    #stats-panel {
+      display: none;
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.7);
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 150;
+    }
+    .stats-inner {
+      background: rgba(30,30,50,0.95);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 12px;
+      padding: 24px 32px;
+      min-width: 320px;
+      max-width: 400px;
+    }
+    .stats-inner h2 {
+      color: #f0c040;
+      font-size: 20px;
+      margin-bottom: 16px;
+      text-align: center;
+    }
+    .stat-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-name {
+      font-size: 13px;
+      color: #ccc;
+      flex: 1;
+    }
+    .stat-level {
+      font-size: 13px;
+      color: #f0c040;
+      width: 50px;
+      text-align: center;
+    }
+    .stat-upgrade {
+      background: rgba(126,200,126,0.2);
+      border: 1px solid rgba(126,200,126,0.4);
+      color: #7ec87e;
+      padding: 4px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .stat-upgrade:hover { background: rgba(126,200,126,0.35); }
+    .stat-upgrade:disabled {
+      background: rgba(100,100,100,0.2);
+      border-color: rgba(100,100,100,0.3);
+      color: #666;
+      cursor: not-allowed;
+    }
+    .stats-cost {
+      text-align: center;
+      font-size: 12px;
+      color: #888;
+      margin-top: 12px;
+    }
+    #close-stats {
+      display: block;
+      margin: 16px auto 0;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #eee;
+      padding: 8px 24px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    #close-stats:hover { background: rgba(255,255,255,0.2); }
+
+    /* ── Bank Panel ───────────────────────────────────── */
+    #bank-panel, #scribe-panel {
+      display: none;
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.7);
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 150;
+    }
+    .npc-inner {
+      background: rgba(30,30,50,0.95);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 12px;
+      padding: 24px 32px;
+      min-width: 320px;
+      max-width: 420px;
+    }
+    .npc-inner h2 {
+      color: #f0c040;
+      font-size: 20px;
+      margin-bottom: 16px;
+      text-align: center;
+    }
+    .bank-balances {
+      display: flex;
+      justify-content: space-around;
+      margin-bottom: 16px;
+    }
+    .bank-bal {
+      text-align: center;
+    }
+    .bank-bal .bal-label { font-size: 11px; color: #888; }
+    .bank-bal .bal-value { font-size: 22px; color: #f0c040; font-weight: bold; }
+    .bank-actions {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .bank-actions input {
+      flex: 1;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #fff;
+      padding: 8px;
+      border-radius: 4px;
+      font-size: 14px;
+      outline: none;
+    }
+    .bank-btn {
+      background: rgba(126,200,126,0.2);
+      border: 1px solid rgba(126,200,126,0.4);
+      color: #7ec87e;
+      padding: 6px 14px;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .bank-btn:hover { background: rgba(126,200,126,0.35); }
+    .bank-btn.withdraw {
+      background: rgba(255,100,100,0.2);
+      border-color: rgba(255,100,100,0.4);
+      color: #ff6b6b;
+    }
+    .bank-btn.withdraw:hover { background: rgba(255,100,100,0.35); }
+    .bank-quick { display: flex; gap: 8px; justify-content: center; margin-bottom: 16px; }
+    .bank-fee { text-align: center; font-size: 11px; color: #888; margin-bottom: 12px; }
+
+    /* ── Scribe Panel ────────────────────────────────── */
+    .sugg-input-row { display: flex; gap: 8px; margin-bottom: 16px; }
+    .sugg-input-row input {
+      flex: 1;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #fff;
+      padding: 8px;
+      border-radius: 4px;
+      font-size: 13px;
+      outline: none;
+    }
+    .sugg-row {
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .sugg-row-text { font-size: 13px; color: #ccc; margin-bottom: 4px; }
+    .sugg-row-meta { font-size: 11px; color: #888; margin-bottom: 4px; }
+    .sugg-vote-btn {
+      background: rgba(240,192,64,0.2);
+      border: 1px solid rgba(240,192,64,0.4);
+      color: #f0c040;
+      padding: 3px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .sugg-vote-btn:hover { background: rgba(240,192,64,0.35); }
+    .sugg-vote-btn:disabled { background: rgba(100,100,100,0.2); border-color: rgba(100,100,100,0.3); color: #666; cursor: default; }
+    #suggestion-list { max-height: 240px; overflow-y: auto; }
+
+    /* ── Sign Panel ──────────────────────────────────── */
+    #sign-panel {
+      display: none;
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.7);
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 150;
+    }
+    .sign-inner {
+      background: rgba(30,30,50,0.95);
+      border-radius: 12px;
+      padding: 24px 32px;
+      min-width: 320px;
+      max-width: 420px;
+      border: 2px solid rgba(255,255,255,0.15);
+    }
+    .sign-inner.sign-patch_notes {
+      border-color: #d4a040;
+      box-shadow: 0 0 20px rgba(212,160,64,0.15);
+    }
+    .sign-inner.sign-rules {
+      border-color: #c0392b;
+      box-shadow: 0 0 20px rgba(192,57,43,0.15);
+    }
+    .sign-inner.sign-notices {
+      border-color: #3a7bd5;
+      box-shadow: 0 0 20px rgba(58,123,213,0.15);
+    }
+    .sign-title {
+      font-size: 20px;
+      font-weight: bold;
+      margin-bottom: 16px;
+      text-align: center;
+    }
+    .sign-patch_notes .sign-title { color: #d4a040; }
+    .sign-rules .sign-title { color: #c0392b; }
+    .sign-notices .sign-title { color: #3a7bd5; }
+    .sign-content {
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .sign-entry {
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .sign-entry:last-child { border-bottom: none; }
+    .sign-entry-header {
+      font-size: 13px;
+      font-weight: bold;
+      color: #f0c040;
+      margin-bottom: 4px;
+    }
+    .sign-entry-item {
+      font-size: 12px;
+      color: #aaa;
+      padding: 2px 0 2px 8px;
+    }
+    .sign-entry-meta {
+      font-size: 11px;
+      color: #666;
+      margin-top: 2px;
+      padding-left: 8px;
+    }
+
+    /* ── Suggestion option in winner modal ────────────── */
+    #suggestion-option {
+      display: none;
+      background: rgba(126,200,126,0.1);
+      border: 1px solid rgba(126,200,126,0.3);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 16px;
+      text-align: left;
+    }
+    #suggestion-option h4 { color: #7ec87e; font-size: 13px; margin-bottom: 6px; }
+    .sugg-text { font-size: 13px; color: #ccc; margin-bottom: 4px; }
+    .sugg-votes { font-size: 11px; color: #888; margin-bottom: 8px; }
+    #pick-suggestion {
+      background: #7ec87e;
+      color: #1a1a2e;
+      border: none;
+      padding: 8px 20px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    #pick-suggestion:hover { background: #9ed89e; }
+
+    /* ── Rule alert animation ─────────────────────────── */
+    @keyframes ruleAlert {
+      0%, 100% { box-shadow: none; }
+      50% { box-shadow: 0 0 20px rgba(240,192,64,0.5); }
+    }
+    .rule-alert {
+      animation: ruleAlert 0.5s ease 6;
+    }
+
+    /* ── Party Button & Modal ─────────────────────────── */
+    #party-btn {
+      display: none;
+      position: absolute;
+      top: 44px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(68,136,255,0.25);
+      border: 1px solid rgba(68,136,255,0.5);
+      color: #4488ff;
+      padding: 6px 18px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: bold;
+      pointer-events: auto;
+      z-index: 10;
+    }
+    #party-btn:hover { background: rgba(68,136,255,0.4); }
+    #party-modal {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 160;
+      align-items: center;
+      justify-content: center;
+    }
+    #party-modal.open { display: flex; }
+    .party-modal-inner {
+      background: rgba(20,25,55,0.97);
+      border: 1px solid rgba(68,136,255,0.4);
+      border-radius: 12px;
+      padding: 24px 32px;
+      min-width: 300px;
+      max-width: 400px;
+    }
+    .party-modal-inner h2 {
+      color: #4488ff;
+      font-size: 20px;
+      text-align: center;
+      margin-bottom: 16px;
+    }
+    .party-member {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      background: rgba(255,255,255,0.04);
+      border-radius: 6px;
+      margin-bottom: 6px;
+      color: #ccc;
+    }
+    .party-member .pm-arrow {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+    }
+    .party-member .pm-name {
+      color: #4488ff;
+      font-weight: bold;
+      font-size: 14px;
+      flex: 1;
+    }
+    .party-member .pm-coords {
+      color: #888;
+      font-size: 11px;
+    }
+    .party-member .pm-source {
+      color: #7ec87e;
+      font-size: 12px;
+      font-weight: bold;
+      min-width: 50px;
+      text-align: right;
+    }
+    #party-leave {
+      margin-top: 12px;
+      background: rgba(255,80,80,0.2);
+      border: 1px solid rgba(255,80,80,0.4);
+      color: #f88;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      width: 100%;
+    }
+    #party-leave:hover { background: rgba(255,80,80,0.4); }
+    #party-close {
+      margin-top: 6px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15);
+      color: #ccc;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      width: 100%;
+    }
+    #party-close:hover { background: rgba(255,255,255,0.15); }
+
+    /* ── Whitelist Panel ─────────────────────────────── */
+    #whitelist-panel {
+      display: none;
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.7);
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 150;
+    }
+    #whitelist-panel .npc-inner { min-width: 280px; max-width: 360px; }
+    #whitelist-panel h2 { color: #f0c040; font-size: 18px; margin-bottom: 12px; text-align: center; }
+    #whitelist-names {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 12px;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .whitelist-entry {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .wl-slot-num {
+      color: #666;
+      font-size: 11px;
+      min-width: 18px;
+      text-align: right;
+    }
+    .whitelist-entry input {
+      flex: 1;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #fff;
+      padding: 6px 8px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    #whitelist-save {
+      background: #4a4;
+      border: none;
+      color: #fff;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: bold;
+      width: 100%;
+      font-size: 14px;
+    }
+    #whitelist-save:hover { background: #5b5; }
+
+    /* ── Mobile Support ─────────────────────────────── */
+
+    /* Mobile-only elements hidden by default */
+    #mobile-lb-btn,
+    #mobile-lb-panel,
+    #mobile-feed-strip,
+    #mobile-feed-drawer,
+    #mobile-menu-btn,
+    #mobile-attack-btns,
+    #mobile-build-toggle,
+    #mobile-shield-btn,
+    #mobile-parry-btn { display: none; }
+
+    /* Canvas touch-action fallback (before JS adds .mobile) */
+    @media (max-width: 768px), (max-height: 500px) {
+      #game-canvas { touch-action: none; }
+    }
+
+    /* ── Mobile: Hide desktop elements ── */
+    .mobile #coords-display { display: none; }
+    .mobile #gwl-btn { display: none; }
+    .mobile #stats-btn { display: none; }
+    .mobile #leaderboard { display: none; }
+    .mobile #online-container { display: none; }
+    .mobile #notif-container { display: none; }
+    .mobile #chat-container { display: none; }
+    .mobile #party-btn { display: none !important; }
+    .mobile #build-counter { display: none; }
+    .mobile .build-bar { display: none; }
+    .mobile .controls-hint { display: none; }
+
+    /* ── Mobile: Compact top-left HUD ── */
+    .mobile .hud-left {
+      padding: 6px 8px;
+      gap: 2px;
+    }
+    .mobile .hp-bar-outer {
+      width: 120px;
+      height: 12px;
+      cursor: pointer;
+    }
+    .mobile .source-display { font-size: 11px; }
+    .mobile .phase-display { font-size: 10px; }
+
+    /* ── Mobile: Join screen ── */
+    .mobile #join-screen {
+      padding: 8px 12px;
+      gap: 4px;
+      overflow-y: auto;
+      justify-content: flex-start;
+      padding-top: 12px;
+    }
+    .mobile #join-screen h1 { font-size: 22px; letter-spacing: 2px; }
+    .mobile #join-screen .subtitle { font-size: 11px; margin-bottom: 2px; }
+    .mobile .logo-lockup { gap: 4px; }
+    .mobile .logo-lockup img { width: 48px; height: 48px; }
+    .mobile .join-form {
+      padding: 12px;
+      gap: 8px;
+      width: calc(100vw - 24px);
+      max-width: 340px;
+    }
+    .mobile .join-form input[type="text"] { width: 100%; padding: 8px 12px; font-size: 14px; }
+    .mobile .preview-char { width: 40px; height: 52px; margin: 0 auto; }
+    .mobile .color-row { gap: 6px; padding: 3px 8px; }
+    .mobile .color-row span { font-size: 11px; }
+    .mobile .custom-color-btn { width: 30px; height: 22px; }
+    .mobile #play-btn { padding: 10px 20px; font-size: 15px; }
+    .mobile .htp-btn { font-size: 11px; padding: 6px 16px; }
+    .mobile .error-msg { font-size: 11px; min-height: 14px; }
+
+
+    /* ── Mobile: Canvas ── */
+    .mobile #game-canvas {
+      touch-action: none;
+      cursor: none;
+    }
+
+    /* ── Mobile: Top bar buttons ── */
+    .mobile-top-btn {
+      position: absolute;
+      top: 8px;
+      background: rgba(0,0,0,0.5);
+      border: 1px solid rgba(255,255,255,0.15);
+      color: #ccc;
+      border-radius: 6px;
+      cursor: pointer;
+      pointer-events: auto;
+      z-index: 20;
+      touch-action: manipulation;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .mobile-top-btn:active { background: rgba(255,255,255,0.15); }
+
+    #mobile-menu-btn {
+      right: 8px;
+      width: 28px;
+      height: 28px;
+      font-size: 14px;
+    }
+    #mobile-lb-btn {
+      right: 40px;
+      padding: 5px 8px;
+      height: 28px;
+      font-size: 10px;
+      color: #f0c040;
+    }
+    #mobile-lb-btn:active { background: rgba(255,255,255,0.15); }
+
+    /* ── Mobile: LB + Online panel ── */
+    #mobile-lb-panel {
+      display: none;
+      position: absolute;
+      top: 44px;
+      right: 8px;
+      width: 180px;
+      background: rgba(0,0,0,0.9);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 8px;
+      padding: 8px 10px;
+      z-index: 25;
+      pointer-events: auto;
+      max-height: 40vh;
+      overflow-y: auto;
+    }
+    #mobile-lb-panel.open { display: block; }
+    #mobile-lb-panel h3 {
+      font-size: 10px;
+      color: #f0c040;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 4px;
+    }
+    .mobile-lb-divider {
+      font-size: 9px;
+      color: #888;
+      margin-top: 6px;
+      margin-bottom: 3px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      padding-top: 4px;
+    }
+
+    /* ── Mobile: Feed strip (transparent card at top) ── */
+    #mobile-feed-strip {
+      position: absolute;
+      top: 6px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 50%;
+      max-width: 400px;
+      min-height: 24px;
+      background: rgba(0,0,0,0.3);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 6px;
+      padding: 3px 8px;
+      pointer-events: auto;
+      touch-action: manipulation;
+      z-index: 18;
+      cursor: pointer;
+    }
+    #mobile-feed-strip-items {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+    .mobile-feed-strip-msg {
+      font-size: 10px;
+      color: #ddd;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      line-height: 1.3;
+    }
+    .mobile-feed-strip-msg .chat-name { color: #7ec87e; font-weight: bold; }
+    .mobile-feed-notif { color: #aaa; }
+    .mobile-feed-notif.notif-kill { color: #f0c040; }
+    .mobile-feed-notif.notif-phase { color: #ffb347; font-style: italic; }
+    .mobile-feed-notif.notif-death { color: #e55; }
+    .mobile-feed-notif.notif-party { color: #4488ff; }
+    .mobile-feed-notif.notif-source { color: #7ec87e; }
+    .mobile-feed-notif.notif-rule { color: #f0c040; font-weight: bold; }
+    #mobile-feed-badge {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      background: #f44336;
+      color: #fff;
+      font-size: 8px;
+      font-weight: bold;
+      border-radius: 8px;
+      padding: 1px 4px;
+      min-width: 14px;
+      text-align: center;
+      display: none;
+    }
+    #mobile-feed-badge.visible { display: block; }
+
+    /* ── Mobile: Feed drawer (full chat + notifications) ── */
+    #mobile-feed-drawer {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 50vh;
+      background: rgba(15,15,30,0.97);
+      border-top: 1px solid rgba(255,255,255,0.15);
+      border-radius: 12px 12px 0 0;
+      z-index: 200;
+      flex-direction: column;
+      pointer-events: auto;
+    }
+    #mobile-feed-drawer.open { display: flex; }
+    .mobile-feed-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 14px 4px;
+      font-size: 12px;
+      color: #aaa;
+      flex-shrink: 0;
+    }
+    .mobile-feed-close {
+      background: none;
+      border: none;
+      color: #aaa;
+      font-size: 20px;
+      cursor: pointer;
+      padding: 0 4px;
+      touch-action: manipulation;
+    }
+    #mobile-feed-msgs {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 10px;
+    }
+    .mobile-feed-item {
+      font-size: 11px;
+      color: #ddd;
+      padding: 2px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+    }
+    .mobile-feed-item .chat-name { color: #7ec87e; font-weight: bold; }
+    .mobile-feed-input-row {
+      display: flex;
+      gap: 6px;
+      padding: 6px 10px;
+      flex-shrink: 0;
+      border-top: 1px solid rgba(255,255,255,0.08);
+    }
+    #mobile-feed-input {
+      flex: 1;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #fff;
+      padding: 6px 10px;
+      border-radius: 16px;
+      font-size: 13px;
+      outline: none;
+    }
+    #mobile-feed-input:focus { border-color: #7ec87e; }
+    #mobile-feed-send {
+      background: rgba(126,200,126,0.25);
+      border: 1px solid rgba(126,200,126,0.5);
+      color: #7ec87e;
+      padding: 6px 12px;
+      border-radius: 16px;
+      font-size: 13px;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+
+    /* ── Mobile: Attack mode buttons (horizontal row above right stick) ── */
+    #mobile-attack-btns {
+      position: absolute;
+      top: calc(72% - 110px);
+      right: 50px;
+      flex-direction: row;
+      gap: 5px;
+      z-index: 15;
+      pointer-events: auto;
+    }
+    .mobile-atk-btn {
+      width: 44px;
+      height: 36px;
+      border-radius: 8px;
+      border: 2px solid rgba(255,255,255,0.15);
+      background: rgba(0,0,0,0.45);
+      color: #999;
+      font-size: 8px;
+      font-weight: bold;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      touch-action: manipulation;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .mobile-atk-btn.active {
+      border-color: #f0c040;
+      color: #f0c040;
+      background: rgba(240,192,64,0.2);
+    }
+
+    /* ── Mobile: Shield button (left side, above left stick) ── */
+    #mobile-shield-btn {
+      position: absolute;
+      top: calc(72% - 12px);
+      right: 195px;
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      border: 2px solid rgba(100,150,255,0.4);
+      background: rgba(0,0,0,0.45);
+      color: #6496ff;
+      font-size: 8px;
+      font-weight: bold;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      touch-action: manipulation;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      z-index: 15;
+      pointer-events: auto;
+    }
+    #mobile-shield-btn.held {
+      border-color: #6496ff;
+      background: rgba(100,150,255,0.3);
+      box-shadow: 0 0 12px rgba(100,150,255,0.4);
+    }
+
+    /* ── Mobile: Parry button (right side, left of right stick) ── */
+    #mobile-parry-btn {
+      position: absolute;
+      top: calc(72% - 60px);
+      right: 195px;
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      background: rgba(0,0,0,0.4);
+      border: 2px solid rgba(255,200,60,0.5);
+      color: #ffd740;
+      font-size: 9px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      touch-action: manipulation;
+      z-index: 15;
+      pointer-events: auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #mobile-parry-btn.held {
+      border-color: #ffd740;
+      background: rgba(255,200,60,0.3);
+      box-shadow: 0 0 12px rgba(255,200,60,0.4);
+    }
+
+    /* ── Mobile: Dash button (below shield) ── */
+    #mobile-dash-btn {
+      position: absolute;
+      top: calc(72% + 36px);
+      right: 195px;
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      border: 2px solid rgba(126,200,126,0.4);
+      background: rgba(0,0,0,0.45);
+      color: #7ec87e;
+      font-size: 8px;
+      font-weight: bold;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      touch-action: manipulation;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      z-index: 15;
+      pointer-events: auto;
+    }
+    #mobile-dash-btn:active {
+      border-color: #7ec87e;
+      background: rgba(126,200,126,0.3);
+      box-shadow: 0 0 12px rgba(126,200,126,0.4);
+    }
+
+    /* ── Mobile: Interact button ── */
+    #mobile-interact-btn {
+      position: absolute;
+      top: calc(72% - 110px);
+      left: 110px;
+      width: 56px;
+      height: 56px;
+      border-radius: 28px;
+      border: 2px solid rgba(240,192,64,0.5);
+      background: rgba(0,0,0,0.5);
+      color: #f0c040;
+      font-size: 7px;
+      font-weight: bold;
+      cursor: pointer;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      touch-action: manipulation;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      z-index: 15;
+      pointer-events: auto;
+      animation: interactPulse 1.5s ease-in-out infinite;
+    }
+    @keyframes interactPulse {
+      0%, 100% { box-shadow: 0 0 4px rgba(240,192,64,0.2); border-color: rgba(240,192,64,0.4); }
+      50% { box-shadow: 0 0 14px rgba(240,192,64,0.6); border-color: rgba(240,192,64,0.8); }
+    }
+
+    /* ── Mobile: Build toggle button ── */
+    #mobile-build-toggle {
+      position: absolute;
+      bottom: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.55);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #ccc;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: bold;
+      cursor: pointer;
+      pointer-events: auto;
+      z-index: 20;
+      touch-action: manipulation;
+    }
+    #mobile-build-label {
+      display: none;
+      position: absolute;
+      bottom: 120px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.6);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 6px;
+      padding: 6px 14px;
+      color: #f0c040;
+      font-size: 13px;
+      font-weight: bold;
+      text-align: center;
+      z-index: 25;
+      pointer-events: none;
+    }
+    #mobile-build-toggle:active { background: rgba(255,255,255,0.15); }
+    #mobile-build-toggle.active {
+      border-color: #7ec87e;
+      color: #7ec87e;
+      background: rgba(126,200,126,0.15);
+    }
+
+    /* ── Mobile: Build tray (slides up from build toggle) ── */
+    #mobile-build-tray {
+      display: none;
+      position: absolute;
+      bottom: 44px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.85);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 8px;
+      padding: 6px 8px;
+      gap: 4px;
+      z-index: 20;
+      pointer-events: auto;
+      flex-direction: row;
+    }
+    #mobile-build-tray.open { display: flex; }
+    #mobile-build-tray .build-btn {
+      padding: 8px 10px;
+      font-size: 10px;
+      min-width: 52px;
+      touch-action: manipulation;
+    }
+    /* ── Server Browser ──────────────────────────────── */
+    #server-browser {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      gap: 12px;
+      padding: 16px 20px;
+      overflow-y: auto;
+    }
+    #server-browser .logo-lockup { gap: 8px; }
+    #server-browser .logo-lockup img {
+      width: 96px;
+      height: 96px;
+      filter: drop-shadow(0 0 24px rgba(76, 155, 76, 0.4));
+    }
+    #server-browser h1 {
+      font-size: 48px;
+      color: #7ec87e;
+      text-shadow: 0 0 20px rgba(126,200,126,0.3);
+      letter-spacing: 4px;
+    }
+    /* Fullscreen toggle button */
+    .fullscreen-btn {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      z-index: 9999;
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: rgba(255,255,255,0.4);
+      border-radius: 6px;
+      width: 32px;
+      height: 32px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 0.15s, background 0.15s;
+      padding: 0;
+    }
+    .fullscreen-btn:hover { color: rgba(255,255,255,0.8); background: rgba(255,255,255,0.12); }
+    @media (max-width: 768px), (max-height: 500px) {
+      .fullscreen-btn { right: auto; left: 10px; }
+    }
+
+    /* Hide columns on narrow portrait screens */
+    @media (max-width: 560px) {
+      .server-table th:nth-child(4),
+      .server-table td:nth-child(4),
+      .server-table th:nth-child(5),
+      .server-table td:nth-child(5),
+      .server-table th:nth-child(6),
+      .server-table td:nth-child(6) { display: none; }
+      .server-table th, .server-table td { padding: 8px 8px; }
+      .server-list-container { max-width: 100%; }
+      .browser-divider, .direct-connect { max-width: 100%; }
+      .server-search { padding: 7px 10px; font-size: 12px; }
+      .servers-pagination { padding: 5px 0; gap: 10px; font-size: 11px; }
+      .page-btn { padding: 2px 8px; font-size: 14px; }
+    }
+
+    /* Compact server browser on short viewports (landscape mobile) */
+    @media (max-height: 500px) {
+      #server-browser { gap: 0; padding: 4px 12px; justify-content: flex-start; overflow-y: auto; }
+      /* Combine logo + PLAY into one horizontal bar */
+      #server-browser .logo-lockup { flex-direction: row; gap: 8px; align-items: center; margin-bottom: 2px; }
+      #server-browser .logo-lockup img { width: 24px; height: 24px; animation: none; }
+      #server-browser h1 { font-size: 16px; margin-bottom: 0; letter-spacing: 2px; }
+      #server-browser .subtitle { display: none; }
+      #play-main-btn { padding: 5px 20px; font-size: 13px; border-radius: 6px; }
+      .browser-divider { margin: 0; font-size: 11px; gap: 8px; }
+      .server-list-container { max-height: none; overflow-y: visible; }
+      .server-search { padding: 5px 8px; font-size: 11px; }
+      .server-table th { padding: 3px 6px; font-size: 10px; }
+      .server-row td { padding: 3px 6px; font-size: 11px; }
+      .servers-pagination { padding: 3px 0; gap: 8px; font-size: 10px; }
+      .page-btn { padding: 1px 6px; font-size: 13px; }
+      .direct-connect { display: none; }
+      #server-browser > div[style*="flex"] { display: none !important; }
+      #server-browser > div[style*="margin-top:10px"] { display: none !important; }
+      /* Hide Mods, Ping, Description in landscape too */
+      .server-table th:nth-child(4),
+      .server-table td:nth-child(4),
+      .server-table th:nth-child(5),
+      .server-table td:nth-child(5),
+      .server-table th:nth-child(6),
+      .server-table td:nth-child(6) { display: none; }
+    }
+    #play-main-btn {
+      background: #7ec87e;
+      color: #1a1a2e;
+      border: none;
+      padding: 16px 48px;
+      margin: 12px 0;
+      border-radius: 10px;
+      font-size: 22px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.2s;
+      letter-spacing: 2px;
+    }
+    #play-main-btn:hover { background: #9ed89e; }
+    #play-main-btn.gp-focus {
+      background: #9ed89e !important;
+      outline: 3px solid #fff !important;
+      outline-offset: 3px;
+    }
+    .browser-divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      max-width: 700px;
+      color: #555;
+      font-size: 12px;
+    }
+    .refresh-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: rgba(126, 200, 126, 0.1);
+      border: 1px solid rgba(126, 200, 126, 0.25);
+      color: #7ec87e;
+      border-radius: 6px;
+      padding: 4px 12px;
+      cursor: pointer;
+      font-size: 12px;
+      font-family: inherit;
+      transition: background 0.15s, border-color 0.15s, transform 0.15s;
+    }
+    .refresh-btn:hover {
+      background: rgba(126, 200, 126, 0.2);
+      border-color: rgba(126, 200, 126, 0.4);
+    }
+    .refresh-btn:active { transform: scale(0.95); }
+    .refresh-btn.spinning .refresh-icon {
+      animation: spin 0.6s cubic-bezier(0.25, 1, 0.5, 1);
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .browser-divider::before, .browser-divider::after {
+      content: '';
+      flex: 1;
+      border-top: 1px solid rgba(255,255,255,0.08);
+    }
+    .server-list-container {
+      width: 100%;
+      max-width: 700px;
+      background: rgba(0,0,0,0.3);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 8px;
+    }
+    .server-search {
+      width: 100%;
+      padding: 8px 12px;
+      background: rgba(0,0,0,0.3);
+      border: none;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      border-radius: 8px 8px 0 0;
+      color: #ccc;
+      font-size: 13px;
+      outline: none;
+      box-sizing: border-box;
+    }
+    .server-search::placeholder { color: #555; }
+    .server-search:focus { background: rgba(0,0,0,0.5); }
+    .servers-pagination {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 6px 0;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      font-size: 12px;
+      color: #888;
+    }
+    .page-btn {
+      background: none;
+      border: 1px solid rgba(255,255,255,0.15);
+      color: #ccc;
+      padding: 2px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+    }
+    .page-btn:hover:not(:disabled) { background: rgba(255,255,255,0.08); }
+    .page-btn:disabled { opacity: 0.3; cursor: default; }
+
+    /* ── Color Picker Overlay ──────────────────────── */
+    .color-picker-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+    }
+    .color-picker-panel {
+      background: #1a1a2e;
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 10px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-width: 320px;
+      width: 90vw;
+    }
+    .color-picker-preview {
+      width: 100%;
+      height: 28px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.15);
+    }
+    .color-picker-grid {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 5px;
+    }
+    .color-picker-hue-row {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 3px;
+    }
+    .color-swatch {
+      width: 100%;
+      aspect-ratio: 1;
+      border: 2px solid transparent;
+      border-radius: 4px;
+      cursor: pointer;
+      padding: 0;
+      transition: border-color 0.15s, transform 0.1s;
+    }
+    .color-swatch:hover, .color-swatch.gp-focus {
+      border-color: #fff;
+      transform: scale(1.15);
+      z-index: 1;
+    }
+    .color-swatch-selected {
+      border-color: #7ec87e !important;
+      box-shadow: 0 0 6px rgba(126,200,126,0.5);
+    }
+    .color-swatch-hue {
+      aspect-ratio: 2/1;
+      border-radius: 3px;
+    }
+    .color-picker-btns {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+    .color-picker-ok, .color-picker-cancel {
+      padding: 6px 18px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.15);
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .color-picker-ok {
+      background: #7ec87e;
+      color: #1a1a2e;
+      border-color: #7ec87e;
+      font-weight: 600;
+    }
+    .color-picker-ok:hover, .color-picker-ok.gp-focus { background: #6ab86a; }
+    .color-picker-cancel {
+      background: rgba(255,255,255,0.08);
+      color: #ccc;
+    }
+    .color-picker-cancel:hover, .color-picker-cancel.gp-focus { background: rgba(255,255,255,0.15); }
+
+    .server-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .server-table th {
+      text-align: left;
+      padding: 8px 12px;
+      font-size: 11px;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      cursor: pointer;
+      user-select: none;
+    }
+    .server-table th:hover { color: #ccc; }
+    .server-row {
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    .server-row:hover, .server-row.gp-focus { background: rgba(255,255,255,0.05); }
+    .server-row.gp-focus { outline: 2px solid #f0c040; outline-offset: -2px; }
+    .server-row td {
+      padding: 8px 12px;
+      font-size: 13px;
+      color: #ccc;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .server-row.server-main td:first-child {
+      color: #7ec87e;
+      font-weight: bold;
+    }
+    .direct-connect {
+      display: flex;
+      gap: 8px;
+      width: 100%;
+      max-width: 700px;
+    }
+    .direct-connect input {
+      flex: 1;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15);
+      color: #eee;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 14px;
+      outline: none;
+    }
+    .direct-connect input:focus { border-color: #7ec87e; }
+    .direct-connect button {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #eee;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .direct-connect button:hover { background: rgba(255,255,255,0.2); }
+  </style>
+  <script>
+    // Set mobile class before first paint to prevent desktop→mobile flash
+    if (navigator.maxTouchPoints > 0) {
+      document.documentElement.classList.add('mobile');
+      document.addEventListener('DOMContentLoaded', function() { document.body.classList.add('mobile'); });
+    }
+    // Auto-fullscreen when opened as installed PWA
+    if (window.matchMedia('(display-mode: standalone)').matches || navigator.standalone) {
+      document.addEventListener('click', function goFS() {
+        document.documentElement.requestFullscreen().catch(function(){});
+        document.removeEventListener('click', goFS);
+      }, { once: true });
+    }
+    // Fullscreen toggle button
+    document.addEventListener('DOMContentLoaded', function() {
+      var fsBtn = document.getElementById('fullscreen-btn');
+      if (fsBtn) {
+        fsBtn.addEventListener('click', function() {
+          if (document.fullscreenElement) {
+            document.exitFullscreen().catch(function(){});
+          } else {
+            document.documentElement.requestFullscreen().catch(function(){});
+          }
+        });
+        // Hide button if fullscreen API not available
+        if (!document.documentElement.requestFullscreen) fsBtn.style.display = 'none';
+        // Hide during gameplay (canvas handles its own fullscreen)
+        document.addEventListener('fullscreenchange', function() {
+          fsBtn.style.opacity = document.fullscreenElement ? '0.3' : '1';
+        });
+      }
+    });
+  </script>
+</head>
+<body>
+  <!-- Fullscreen toggle -->
+  <button class="fullscreen-btn" id="fullscreen-btn" title="Toggle fullscreen">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="15 3 21 3 21 9"></polyline>
+      <polyline points="9 21 3 21 3 15"></polyline>
+      <line x1="21" y1="3" x2="14" y2="10"></line>
+      <line x1="3" y1="21" x2="10" y2="14"></line>
+    </svg>
+  </button>
+
+  <!-- Server Browser (main server only, injected via IS_MAIN_SERVER) -->
+  <div id="server-browser">
+    <div class="logo-lockup">
+      <img src="/logo.png" alt="PlainScape">
+      <h1>PLAINSCAPE</h1>
+      <p class="subtitle">Survive the plains. Change the plains.</p>
+    </div>
+    <button id="play-main-btn">PLAY</button>
+    <div class="browser-divider">or browse servers <button id="refresh-servers-btn" class="refresh-btn">
+      <svg class="refresh-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="23 4 23 10 17 10"></polyline>
+        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+      </svg>
+      Refresh</button></div>
+    <div class="server-list-container">
+      <input type="text" id="server-search" class="server-search" placeholder="Search servers...">
+      <table class="server-table">
+        <thead>
+          <tr>
+            <th>Server</th>
+            <th>Players</th>
+            <th style="text-align:center">🔒</th>
+            <th style="text-align:center">Mods</th>
+            <th style="text-align:center">Ping</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody id="server-rows"></tbody>
+      </table>
+      <div id="servers-pagination" class="servers-pagination" style="display:none">
+        <button id="servers-prev" class="page-btn" disabled>&lsaquo;</button>
+        <span id="servers-page-info">1 / 1</span>
+        <button id="servers-next" class="page-btn">&rsaquo;</button>
+      </div>
+    </div>
+    <div class="direct-connect">
+      <input type="text" id="direct-ip" placeholder="Connect by IP:Port">
+      <button id="direct-connect-btn">Connect</button>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;justify-content:center">
+      <a href="https://github.com/chvolk/PlainScape-Community/releases" target="_blank" style="display:flex;align-items:center;gap:6px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:#eee;padding:8px 16px;border-radius:8px;text-decoration:none;font-size:13px;transition:background 0.2s">
+        <svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        Host a Server
+      </a>
+      <a href="https://www.patreon.com/c/PlainScape" target="_blank" style="display:flex;align-items:center;gap:6px;background:rgba(255,100,70,0.15);border:1px solid rgba(255,100,70,0.3);color:#ff6346;padding:8px 16px;border-radius:8px;text-decoration:none;font-size:13px;transition:background 0.2s">
+        <svg height="16" width="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14.82 2.41c3.96 0 7.18 3.24 7.18 7.21 0 3.96-3.22 7.18-7.18 7.18-3.97 0-7.21-3.22-7.21-7.18 0-3.97 3.24-7.21 7.21-7.21zM2 21.6h3.5V2.41H2V21.6z"/></svg>
+        Get Listed — Become a Patron
+      </a>
+    </div>
+    <div style="margin-top:10px">
+      <script type="text/javascript" src="https://cdnjs.buymeacoffee.com/1.0.0/button.prod.min.js" data-name="bmc-button" data-slug="PlainScape" data-color="#40DCA5" data-emoji="" data-font="Poppins" data-text="Buy me a coffee" data-outline-color="#000000" data-font-color="#ffffff" data-coffee-color="#FFDD00"></script>
+    </div>
+  </div>
+
+  <!-- Join Screen -->
+  <div id="join-screen">
+    <div class="logo-lockup">
+      <img src="/logo.png" alt="PlainScape">
+      <h1>PLAINSCAPE</h1>
+      <p class="subtitle">Survive the plains. Change the plains.</p>
+    </div>
+    <div class="join-form">
+      <input type="text" id="username" placeholder="Enter username" maxlength="20" autofocus>
+      <canvas id="char-preview" class="preview-char" width="80" height="100"></canvas>
+      <div class="color-picker-row">
+        <div class="color-pickers">
+          <div class="color-row">
+            <span>Skin</span>
+            <button type="button" id="skin-color-btn" class="custom-color-btn" style="background:#e0ac69"></button>
+          </div>
+          <div class="color-row">
+            <span>Shirt</span>
+            <button type="button" id="shirt-color-btn" class="custom-color-btn" style="background:#3b82f6"></button>
+          </div>
+          <div class="color-row">
+            <span>Pants</span>
+            <button type="button" id="pants-color-btn" class="custom-color-btn" style="background:#1e3a5f"></button>
+          </div>
+        </div>
+        <button type="button" id="randomize-btn" title="Randomize colors">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="16 3 21 3 21 8"></polyline>
+            <line x1="4" y1="20" x2="21" y2="3"></line>
+            <polyline points="21 16 21 21 16 21"></polyline>
+            <line x1="15" y1="15" x2="21" y2="21"></line>
+            <line x1="4" y1="4" x2="9" y2="9"></line>
+          </svg>
+        </button>
+      </div>
+      <input type="password" id="server-password" placeholder="Server password" style="display:none">
+      <button id="play-btn">PLAY</button>
+      <button class="htp-btn" onclick="document.getElementById('htp-modal').classList.add('open')">How to Play</button>
+      <button class="htp-btn" id="back-to-browser" style="display:none">Server Browser</button>
+      <div class="error-msg" id="error-msg"></div>
+    </div>
+  </div>
+
+  <!-- Game Screen -->
+  <div id="game-screen">
+    <canvas id="game-canvas"></canvas>
+
+    <div id="rule-status">
+      <div class="spinner"></div>
+      <span>AI is implementing a new rule...</span>
+    </div>
+
+    <div id="hud">
+      <div class="hud-top">
+        <div class="hud-left">
+          <div class="hp-bar-outer">
+            <div class="hp-bar-inner" id="hp-bar"></div>
+          </div>
+          <div class="source-display" id="source-display">Source: 0</div>
+          <div class="phase-display" id="phase-display">Day</div>
+          <div class="coords-display" id="coords-display">0, 0</div>
+        </div>
+      </div>
+      <button id="gwl-btn" title="Global Whitelist">Whitelist</button>
+    </div>
+
+    <!-- Global Whitelist Modal -->
+    <div id="gwl-modal">
+      <div class="gwl-inner">
+        <h2>Global Whitelist</h2>
+        <p class="gwl-desc">Names added here are automatically whitelisted on all your gates and turrets (existing and new).</p>
+        <div id="gwl-slots"></div>
+        <button id="gwl-save">Save</button>
+        <button id="gwl-close">Close</button>
+      </div>
+    </div>
+
+    <button id="stats-btn">Stats</button>
+
+    <div id="leaderboard">
+      <div class="notif-card-header" id="lb-toggle">
+        <span>Top Source</span>
+        <span class="notif-card-toggle" id="lb-toggle-icon">&#x25BC;</span>
+      </div>
+      <div id="lb-entries"></div>
+      <div id="champion-timer"></div>
+    </div>
+
+    <div id="online-container">
+      <div class="notif-card">
+        <div class="notif-card-header" id="online-toggle">
+          <span>Online <span id="online-count" style="color:#7ec87e"></span></span>
+          <span class="notif-card-toggle" id="online-toggle-icon">&#x25BC;</span>
+        </div>
+        <div id="online-list"></div>
+      </div>
+    </div>
+
+    <div id="notif-container">
+      <div class="notif-card">
+        <div class="notif-card-header" id="notif-toggle">
+          <span>Notifications</span>
+          <span class="notif-card-toggle" id="notif-toggle-icon">&#x25BC;</span>
+        </div>
+        <div id="notification-feed"></div>
+      </div>
+    </div>
+
+    <div id="chat-container">
+      <div class="chat-card">
+        <div class="chat-card-header" id="chat-toggle">
+          <span>Chat <span style="font-size:10px;color:#666">[Enter]</span></span>
+          <span class="chat-card-toggle" id="chat-toggle-icon">&#x25BC;</span>
+        </div>
+        <div id="chat-messages"></div>
+        <div id="chat-input-wrapper">
+          <input type="text" id="chat-input" placeholder="Type a message..." maxlength="200">
+        </div>
+      </div>
+    </div>
+
+    <div class="build-bar" id="build-bar">
+      <span id="build-counter" style="color:#aaa;font-size:12px;align-self:center;margin-right:4px;">0/100</span>
+      <button class="build-btn" data-type="wall">Wall <span class="cost">10</span></button>
+      <button class="build-btn" data-type="gate">Gate <span class="cost">15</span></button>
+      <button class="build-btn" data-type="turret">Turret <span class="cost">80</span></button>
+      <button class="build-btn" data-type="bed">Bed <span class="cost">20</span></button>
+      <button class="build-btn demolish-btn" id="demolish-btn">Demolish</button>
+      <button class="build-btn" id="cancel-build" style="display:none">Cancel [ESC]</button>
+    </div>
+
+    <div id="death-overlay">
+      <div>YOU DIED</div>
+      <div id="death-timer"></div>
+    </div>
+
+    <!-- ESC Menu -->
+    <div id="esc-menu">
+      <div class="menu-panel">
+        <h2>PLAINSCAPE</h2>
+        <h3>Controls</h3>
+        <table class="controls-table">
+          <tr><td>WASD</td><td>Move</td></tr>
+          <tr><td>R</td><td>Toggle auto-run</td></tr>
+          <tr><td>Left Click</td><td>Punch (cone attack)</td></tr>
+          <tr><td>Shift + Click</td><td>Lunge (dash forward + AOE)</td></tr>
+          <tr><td>Right Click</td><td>Shoot arrow</td></tr>
+          <tr><td>F</td><td>Parry (reflects melee &amp; projectiles)</td></tr>
+          <tr><td>Space</td><td>Dash (quick dodge in movement direction)</td></tr>
+          <tr><td>Q</td><td>Shield (2s duration, 12s cooldown)</td></tr>
+          <tr><td>1-4</td><td>Build (Wall / Gate / Turret / Bed, same key twice to dismiss)</td></tr>
+          <tr><td>Ctrl + Click</td><td>Party invite (player) / Edit whitelist (gate/turret)</td></tr>
+          <tr><td>Enter</td><td>Open chat</td></tr>
+          <tr><td>ESC</td><td>Open/close this menu</td></tr>
+        </table>
+
+        <hr class="menu-divider">
+
+        <h3>Active Rules</h3>
+        <ul id="rules-list">
+          <li class="no-rules">No active rules this week.</li>
+        </ul>
+
+        <hr class="menu-divider">
+
+        <label class="censor-toggle">
+          <input type="checkbox" id="censor-toggle" checked>
+          Chat profanity filter
+        </label>
+
+        <button class="htp-btn" onclick="document.getElementById('htp-modal').classList.add('open')">How to Play</button>
+        <button class="controller-btn" id="open-controller-config">Configure Controller</button>
+        <button id="close-menu">Resume Game</button>
+        <button id="logout-btn" class="logout-btn">Logout</button>
+      </div>
+    </div>
+
+    <!-- Controller Config Modal -->
+    <div id="controller-modal">
+      <div class="controller-inner">
+        <h2>Controller Config</h2>
+        <div class="controller-status" id="controller-status">No controller detected</div>
+        <label class="censor-toggle" style="margin-top:8px;margin-bottom:4px">
+          <input type="checkbox" id="controller-enabled" checked>
+          Enable controller input
+        </label>
+        <label class="censor-toggle" id="controller-touch-toggle" style="display:none;margin-bottom:8px">
+          <input type="checkbox" id="controller-hide-touch">
+          Hide virtual controller
+        </label>
+        <div id="controller-bindings"></div>
+        <button class="controller-reset" id="controller-reset">Reset to Defaults</button>
+        <button class="controller-close" id="controller-close">Done</button>
+      </div>
+    </div>
+
+    <!-- Bank Panel -->
+    <div id="bank-panel">
+      <div class="npc-inner">
+        <h2>The Banker</h2>
+        <div class="bank-balances">
+          <div class="bank-bal">
+            <div class="bal-label">Pocket</div>
+            <div class="bal-value" id="bank-pocket">0</div>
+          </div>
+          <div class="bank-bal">
+            <div class="bal-label">Banked</div>
+            <div class="bal-value" id="bank-banked">0</div>
+          </div>
+        </div>
+        <div class="bank-actions">
+          <input type="number" id="bank-amount" placeholder="Amount" min="1">
+          <button class="bank-btn" id="deposit-btn">Deposit</button>
+          <button class="bank-btn withdraw" id="withdraw-btn">Withdraw</button>
+        </div>
+        <div class="bank-quick">
+          <button class="bank-btn" id="deposit-all">Deposit All</button>
+          <button class="bank-btn withdraw" id="withdraw-all">Withdraw All</button>
+        </div>
+        <div class="bank-fee">Withdrawal fee: 10%</div>
+        <button id="close-bank" style="display:block;margin:0 auto;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);color:#eee;padding:8px 24px;border-radius:6px;cursor:pointer;font-size:13px">Close</button>
+      </div>
+    </div>
+
+    <!-- Scribe Panel -->
+    <div id="scribe-panel">
+      <div class="npc-inner">
+        <h2>The Scribe</h2>
+        <p style="font-size:12px;color:#888;margin-bottom:12px;text-align:center">Submit rule suggestions (200 Source) or vote for existing ones (50 Source).<br>The daily champion can adopt the top suggestion to avoid sacrifice!</p>
+        <div class="sugg-input-row">
+          <input type="text" id="suggestion-input" placeholder="Suggest a rule..." maxlength="300">
+          <button class="bank-btn" id="submit-suggestion-btn">Submit (200)</button>
+        </div>
+        <div id="suggestion-list"></div>
+        <button id="close-scribe" style="display:block;margin:12px auto 0;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);color:#eee;padding:8px 24px;border-radius:6px;cursor:pointer;font-size:13px">Close</button>
+      </div>
+    </div>
+
+    <!-- Sign Panel -->
+    <div id="sign-panel">
+      <div class="sign-inner">
+        <h2 class="sign-title">Sign</h2>
+        <div class="sign-content"></div>
+        <button id="close-sign" style="display:block;margin:12px auto 0;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);color:#eee;padding:8px 24px;border-radius:6px;cursor:pointer;font-size:13px">Close</button>
+      </div>
+    </div>
+
+    <!-- Party Panel -->
+    <button id="party-btn" style="display:none">Party</button>
+
+    <!-- Party Modal -->
+    <div id="party-modal" onclick="if(event.target===this)this.classList.remove('open')">
+      <div class="party-modal-inner">
+        <h2>Party</h2>
+        <div id="party-members"></div>
+        <button id="party-leave">Leave Party</button>
+        <button id="party-close">Close</button>
+      </div>
+    </div>
+
+    <!-- Whitelist Panel -->
+    <div id="whitelist-panel">
+      <div class="npc-inner">
+        <h2 id="whitelist-title">Whitelist</h2>
+        <div id="whitelist-names"></div>
+        <button id="whitelist-save">Save</button>
+      </div>
+    </div>
+
+    <!-- Stats Panel -->
+    <div id="stats-panel">
+      <div class="stats-inner">
+        <h2>Level Up Stats</h2>
+        <div id="stats-rows"></div>
+        <div class="stats-cost">Cost per level: <span style="color:#f0c040">100 Source</span> | Max level: 25</div>
+        <div class="stats-cost" id="stats-source" style="color:#f0c040;font-size:14px;margin-top:8px">Available: 0 Source</div>
+        <button id="close-stats">Close</button>
+      </div>
+    </div>
+
+    <!-- Winner Modal -->
+    <div id="winner-modal">
+      <div class="winner-panel">
+        <h2>YOU HAVE BEEN CHOSEN</h2>
+        <p>You generated the most Source today!<br>
+        You may now add a rule for all players. Pick the community suggestion to keep your levels, or write your own rule (sacrifice: full stat reset).</p>
+        <div id="suggestion-option">
+          <h4>Community's Top Suggestion (pick this to avoid sacrifice!)</h4>
+          <div class="sugg-text"></div>
+          <div class="sugg-votes"></div>
+          <button id="pick-suggestion">Adopt This Suggestion</button>
+        </div>
+        <p style="font-size:12px;color:#888;margin-bottom:8px">Or write your own rule (you will be sacrificed):</p>
+        <textarea id="rule-input" placeholder="Describe a game mechanic, enemy, effect, or change to add... (must be gameplay-related)"></textarea>
+        <br>
+        <button id="submit-rule">Submit Rule</button>
+        <div class="winner-status" id="winner-status"></div>
+      </div>
+    </div>
+
+    <!-- Mobile: Top bar buttons -->
+    <button id="mobile-menu-btn" class="mobile-top-btn" style="display:none">&#x2630;</button>
+    <button id="mobile-lb-btn" class="mobile-top-btn" style="display:none">&#x1F3C6; <span id="mobile-lb-label">0</span></button>
+    <div id="mobile-lb-panel">
+      <h3>Top Source</h3>
+      <div id="mobile-lb-entries"></div>
+      <div class="mobile-lb-divider">Online</div>
+      <div id="mobile-online-list"></div>
+    </div>
+
+    <!-- Mobile: Feed strip (transparent card at top center) -->
+    <div id="mobile-feed-strip" style="display:none">
+      <div id="mobile-feed-strip-items"></div>
+      <span id="mobile-feed-badge">0</span>
+    </div>
+
+    <!-- Mobile: Feed drawer (chat + notifications combined) -->
+    <div id="mobile-feed-drawer">
+      <div class="mobile-feed-header">
+        <span>Chat & Notifications</span>
+        <button class="mobile-feed-close" id="mobile-feed-drawer-close">&#x2715;</button>
+      </div>
+      <div id="mobile-feed-msgs"></div>
+      <div class="mobile-feed-input-row">
+        <input type="text" id="mobile-feed-input" placeholder="Message..." maxlength="200">
+        <button id="mobile-feed-send">Send</button>
+      </div>
+    </div>
+
+    <!-- Mobile: Attack mode buttons (horizontal, above right stick) -->
+    <div id="mobile-attack-btns" style="display:none">
+      <button class="mobile-atk-btn active" data-atk="punch">PUNCH</button>
+      <button class="mobile-atk-btn" data-atk="lunge">LUNGE</button>
+      <button class="mobile-atk-btn" data-atk="shoot">SHOOT</button>
+    </div>
+
+    <!-- Mobile: Shield button (separate, left side above left stick) -->
+    <button id="mobile-shield-btn" style="display:none">SHIELD</button>
+
+    <!-- Mobile: Parry button -->
+    <button id="mobile-parry-btn" style="display:none">PARRY</button>
+
+    <!-- Mobile: Dash button -->
+    <button id="mobile-dash-btn" style="display:none">DASH</button>
+
+    <!-- Mobile: Interact button (appears near interactables) -->
+    <button id="mobile-interact-btn" style="display:none">INTERACT</button>
+
+    <!-- Mobile: Build placement text -->
+    <div id="mobile-build-label"></div>
+
+    <!-- Mobile: Build toggle + tray -->
+    <button id="mobile-build-toggle" style="display:none">BUILD</button>
+    <div id="mobile-build-tray">
+      <button class="build-btn" data-type="wall">Wall <span class="cost">10</span></button>
+      <button class="build-btn" data-type="gate">Gate <span class="cost">15</span></button>
+      <button class="build-btn" data-type="turret">Turret <span class="cost">80</span></button>
+      <button class="build-btn" data-type="bed">Bed <span class="cost">20</span></button>
+      <button class="build-btn demolish-btn" data-action="demolish">Demolish</button>
+    </div>
+  </div>
+
+  <!-- How to Play Modal -->
+  <div id="htp-modal" onclick="if(event.target===this)this.classList.remove('open')">
+    <div class="htp-panel">
+      <h2>How to Play</h2>
+
+      <h3>Controls</h3>
+      <table class="htp-controls">
+        <tr><td>WASD</td><td>Move</td></tr>
+        <tr><td>R</td><td>Toggle auto-run</td></tr>
+        <tr><td>Left Click</td><td>Punch &mdash; melee cone attack</td></tr>
+        <tr><td>Shift + Click</td><td>Lunge &mdash; dash forward with AOE slam</td></tr>
+        <tr><td>Right Click</td><td>Shoot arrow</td></tr>
+        <tr><td>F</td><td>Parry &mdash; tight window, reflects melee damage and projectiles back</td></tr>
+        <tr><td>Space</td><td>Dash &mdash; quick dodge in movement direction</td></tr>
+        <tr><td>Q</td><td>Shield &mdash; blocks all damage briefly</td></tr>
+        <tr><td>1 &ndash; 4</td><td>Select building (Wall / Gate / Turret / Bed, same key twice to dismiss)</td></tr>
+        <tr><td>Click (building)</td><td>Place selected building on the grid</td></tr>
+        <tr><td>Ctrl + Click</td><td>Party invite (on player) / Edit whitelist (on your gate or turret)</td></tr>
+        <tr><td>Enter</td><td>Open chat</td></tr>
+        <tr><td>ESC</td><td>Menu / cancel build</td></tr>
+      </table>
+      <p style="font-size:11px;color:#888;margin-top:10px"><strong style="color:#f0c040">Laptop tip:</strong> If your trackpad stops working while pressing keys, your OS may be blocking simultaneous input. Disable "Disable touchpad while typing" in your system's touchpad/mouse settings.</p>
+
+      <h3>Objective</h3>
+      <p>Earn <strong style="color:#f0c040">Source</strong> by exploring, killing enemies, and defeating other players. Spend Source to build defenses, level up stats, and bank your wealth. The player who earns the most Source each day gets to add a new rule to the game.</p>
+
+      <h3>Day / Night Cycle</h3>
+      <p>The world cycles through four phases: <strong style="color:#f0c040">Day</strong> (lions roam), <strong style="color:#7799ee">Night</strong> (ghosts haunt), and <strong style="color:#cc8844">Dawn/Dusk</strong> transitions where both lions and ghosts are active at the same time. Plan your adventures around the cycle &mdash; dawn and dusk are the most dangerous.</p>
+
+      <h3>Enemies</h3>
+      <div class="htp-entry">
+        <div class="htp-icon" style="background:#3a2a10;">&#x1F981;</div>
+        <div class="htp-entry-text">
+          <strong>Lion</strong> <span style="color:#c4873a;display:inline">(Day)</span>
+          <span>Melee charger. Lions ramp up speed the longer they chase you, and prolonged chases attract reinforcements. They hunt in packs &mdash; alerting one alerts nearby lions. Weak to ranged attacks.</span>
+        </div>
+      </div>
+      <div class="htp-entry">
+        <div class="htp-icon" style="background:#1a1a30;">&#x1F47B;</div>
+        <div class="htp-entry-text">
+          <strong>Ghost</strong> <span style="color:#7799ee;display:inline">(Night)</span>
+          <span>Ranged kiter. Ghosts keep their distance and fire slow homing projectiles. They strafe to dodge your attacks. Weak to melee &mdash; close the gap fast.</span>
+        </div>
+      </div>
+
+      <h3>Buildings</h3>
+      <div class="htp-entry">
+        <div class="htp-icon" style="background:#2a2a2a;color:#888;font-size:18px;font-weight:bold;">&#x25A0;</div>
+        <div class="htp-entry-text">
+          <strong>Wall</strong> <span style="color:#f0c040;display:inline">(10 Source)</span>
+          <span>Solid barrier. Blocks all movement and projectiles. The backbone of any base.</span>
+        </div>
+      </div>
+      <div class="htp-entry">
+        <div class="htp-icon" style="background:#2a2a2a;color:#c4873a;font-size:18px;">&#x25A4;</div>
+        <div class="htp-entry-text">
+          <strong>Gate</strong> <span style="color:#f0c040;display:inline">(15 Source)</span>
+          <span>Passable door. You and whitelisted players walk through; enemies and other players are blocked. Ctrl+click to manage the whitelist.</span>
+        </div>
+      </div>
+      <div class="htp-entry">
+        <div class="htp-icon" style="background:#2a2a2a;color:#ff4444;font-size:16px;">&#x2BC1;</div>
+        <div class="htp-entry-text">
+          <strong>Turret</strong> <span style="color:#f0c040;display:inline">(80 Source)</span>
+          <span>Auto-targeting cannon. Fires explosive projectiles at nearby enemies and non-whitelisted players. Shots explode on impact with AOE damage. Won't damage your buildings or whitelisted players' buildings.</span>
+        </div>
+      </div>
+      <div class="htp-entry">
+        <div class="htp-icon" style="background:#2a2a2a;color:#e07070;font-size:16px;">&#x2764;</div>
+        <div class="htp-entry-text">
+          <strong>Bed</strong> <span style="color:#f0c040;display:inline">(20 Source)</span>
+          <span>Healing station &amp; respawn point. Slowly heals nearby allies. You respawn here instead of the safe zone. One bed per player.</span>
+        </div>
+      </div>
+
+      <h3>Key Locations</h3>
+      <div class="htp-entry">
+        <div class="htp-icon" style="background:#1a3a1a;color:#7ec87e;font-size:18px;">&#x26A1;</div>
+        <div class="htp-entry-text">
+          <strong>Safe Zone</strong>
+          <span>The green area at the center of the map. No combat or building allowed here. You move 30% faster inside. Enemies that touch it are destroyed. Surrounding the safe zone is a yellow <strong>buffer zone</strong> where building is also prohibited.</span>
+        </div>
+      </div>
+      <div class="htp-entry">
+        <div class="htp-icon" style="background:#3a3a1a;color:#f0c040;font-size:18px;">&#x1F3E6;</div>
+        <div class="htp-entry-text">
+          <strong>The Banker</strong>
+          <span>Walk up to the Banker inside the safe zone to deposit Source for safekeeping. Banked Source is protected from death loss. 10% withdrawal fee.</span>
+        </div>
+      </div>
+      <div class="htp-entry">
+        <div class="htp-icon" style="background:#1a1a3a;color:#aabbff;font-size:18px;">&#x1F4DC;</div>
+        <div class="htp-entry-text">
+          <strong>The Scribe</strong>
+          <span>Submit rule suggestions (200 Source) or vote on others' suggestions (50 Source). The top suggestion is shown to the daily winner for consideration.</span>
+        </div>
+      </div>
+
+      <h3>Parties</h3>
+      <p>Ctrl+click another player to send a party invite. Party members appear <strong style="color:#4488ff">blue</strong> on the minimap and have blue names. Source earned by party members is shared: the earner keeps 20%, and the remainder is split evenly among the whole party.</p>
+
+      <h3>The Rule System</h3>
+      <p>Each day, the player who earned the most Source gets to <strong style="color:#f0c040">add a new rule</strong> to the game. They can type their own idea or pick from the top community suggestion at the Scribe. Rules are implemented live and last until the weekly reset. Rules shape the game &mdash; new enemies, balance changes, fun mechanics &mdash; the world evolves based on what players choose.</p>
+
+      <h3>Stats</h3>
+      <p>Click the <strong>Stats</strong> button to spend Source leveling up your character. Each stat can be upgraded up to 25 times (100 Source per level). Stats include move speed, melee speed, melee range, projectile speed, projectile range, lunge AOE, lunge distance, shield duration, and knockback.</p>
+
+      <p style="font-size:11px;color:#888;margin-top:14px"><strong style="color:#f0c040">Browser tip:</strong> PlainScape runs best in Chrome or Edge. Firefox may have lower frame rates due to differences in Canvas 2D acceleration.</p>
+
+      <button class="htp-close" onclick="document.getElementById('htp-modal').classList.remove('open')">Got it!</button>
+    </div>
+  </div>
+
+  <script type="module" src="game.js"></script>
+  <script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});</script>
+</body>
+</html>
