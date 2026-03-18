@@ -186,8 +186,8 @@ var TouchController = class {
     window.addEventListener("resize", this.boundResize);
   }
   computeZones() {
-    const w = this.canvas.width || window.innerWidth;
-    const h = this.canvas.height || window.innerHeight;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
     const stickY = h * 0.72;
     this.leftZone = { cx: 110, cy: stickY };
     this.rightZone = { cx: w - 110, cy: stickY };
@@ -198,7 +198,7 @@ var TouchController = class {
       const t = e.changedTouches[i];
       const target = t.target;
       if (target !== this.canvas) continue;
-      const halfW = this.canvas.width / 2;
+      const halfW = window.innerWidth / 2;
       if (t.clientX < halfW && this.leftTouchId === null) {
         e.preventDefault();
         this.leftTouchId = t.identifier;
@@ -1107,8 +1107,8 @@ var InputHandler = class {
       const tf = this.touch.getFacing();
       if (!isNaN(tf)) return tf;
     }
-    const cx = this.canvas.width / 2;
-    const cy = this.canvas.height / 2;
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
     return Math.atan2(this.mouseY - cy, this.mouseX - cx);
   }
   getDx() {
@@ -1182,8 +1182,8 @@ var InputHandler = class {
       case "interact":
         if (this.buildMode) {
           if (this.onBuild) {
-            const cx = this.canvas.width / 2 + this.gamepadBuildOffsetX;
-            const cy = this.canvas.height / 2 + this.gamepadBuildOffsetY;
+            const cx = window.innerWidth / 2 + this.gamepadBuildOffsetX;
+            const cy = window.innerHeight / 2 + this.gamepadBuildOffsetY;
             this.onBuild(this.buildMode, cx, cy);
           }
         } else {
@@ -3475,7 +3475,7 @@ function drawTurretProjectile(ctx, entity) {
 }
 
 // client/src/ui/HudRenderer.ts
-function drawHud(ctx, state2, canvas) {
+function drawHud(ctx, state2, screenW, screenH) {
   const hpBar = document.getElementById("hp-bar");
   const sourceDisplay = document.getElementById("source-display");
   const phaseDisplay = document.getElementById("phase-display");
@@ -3520,15 +3520,15 @@ function drawHud(ctx, state2, canvas) {
       deathOverlay.style.display = "none";
     }
   }
-  drawMinimap(ctx, state2, canvas);
-  drawCooldownBars(ctx, state2, canvas);
+  drawMinimap(ctx, state2, screenW, screenH);
+  drawCooldownBars(ctx, state2, screenW, screenH);
 }
-function drawMinimap(ctx, state2, canvas) {
+function drawMinimap(ctx, state2, screenW, screenH) {
   const isMobile = document.body.classList.contains("mobile");
   const size = isMobile ? 80 : 140;
   const padding = isMobile ? 8 : 16;
-  const mapX = canvas.width - size - padding;
-  const mapY = isMobile ? 38 : canvas.height - size - padding;
+  const mapX = screenW - size - padding;
+  const mapY = isMobile ? 38 : screenH - size - padding;
   const worldRadius = VIEW_RADIUS * 1.5;
   const scale = size / 2 / worldRadius;
   const cx = mapX + size / 2;
@@ -3631,15 +3631,15 @@ var ABILITY_SLOTS = [
   { label: "SHIELD", key: "Space", color: "#6496ff", getCooldownUntil: (s) => s.selfShieldCooldownUntil, maxCooldown: SHIELD_COOLDOWN },
   { label: "DASH", key: "Q", color: "#7ec87e", getCooldownUntil: (s) => s.selfDashCooldownUntil, maxCooldown: DASH_COOLDOWN }
 ];
-function drawCooldownBars(ctx, state2, canvas) {
+function drawCooldownBars(ctx, state2, screenW, screenH) {
   if (state2.selfDead) return;
   const now = Date.now();
-  const slotW = 52;
+  const slotW = 40;
   const slotH = 6;
   const gap = 3;
   const totalW = ABILITY_SLOTS.length * slotW + (ABILITY_SLOTS.length - 1) * gap;
-  const barY = canvas.height - 100;
-  const startX = (canvas.width - totalW) / 2;
+  const barY = screenH - 100;
+  const startX = (screenW - totalW) / 2;
   ctx.save();
   for (let i = 0; i < ABILITY_SLOTS.length; i++) {
     const slot = ABILITY_SLOTS[i];
@@ -3969,36 +3969,50 @@ var Renderer = class {
   state;
   input;
   particles = [];
+  logicalW = 0;
+  logicalH = 0;
   constructor(canvas, state2, input2) {
     this.canvas = canvas;
-    this.ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
+    this.ctx = canvas.getContext("2d", { alpha: false });
     this.state = state2;
     this.input = input2;
     this.resize();
     window.addEventListener("resize", () => this.resize());
   }
   resize() {
-    this.canvas.width = window.innerWidth;
-    this.canvas.height = window.innerHeight;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    this.logicalW = w;
+    this.logicalH = h;
+    this.canvas.width = w * dpr;
+    this.canvas.height = h * dpr;
+    this.canvas.style.width = w + "px";
+    this.canvas.style.height = h + "px";
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
   render() {
-    const { ctx, canvas, state: state2 } = this;
+    const { ctx, state: state2 } = this;
+    const W = this.logicalW;
+    const H = this.logicalH;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     if (state2.myId > 0) setServerPhase(state2.dayPhase);
     state2.updateCamera();
     const cam = { x: state2.cameraX, y: state2.cameraY };
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, W, H);
     ctx.save();
-    ctx.translate(canvas.width / 2 - cam.x, canvas.height / 2 - cam.y);
-    drawWorld(ctx, cam, canvas.width, canvas.height, state2.dayPhase);
+    ctx.translate(W / 2 - cam.x, H / 2 - cam.y);
+    drawWorld(ctx, cam, W, H, state2.dayPhase);
     this.drawSafeZone(ctx);
     const mouse = this.input.getMouseScreenPos();
-    const mouseWorldX = mouse.x - canvas.width / 2 + cam.x;
-    const mouseWorldY = mouse.y - canvas.height / 2 + cam.y;
+    const mouseWorldX = mouse.x - W / 2 + cam.x;
+    const mouseWorldY = mouse.y - H / 2 + cam.y;
     drawBuildings(ctx, state2, mouseWorldX, mouseWorldY);
     if (this.input.buildMode) {
       const isGamepad = this.input.gamepad.enabled && this.input.gamepad.connected;
       if (this.input.isMobile && !isGamepad) {
-        this.drawBuildRangeOverlay(ctx, state2.selfPos.x, state2.selfPos.y, canvas.width, canvas.height, cam);
+        this.drawBuildRangeOverlay(ctx, state2.selfPos.x, state2.selfPos.y, W, H, cam);
         const preview = this.input.mobileBuildPreview;
         if (preview) {
           const previewWorldX = preview.cellX * CELL_SIZE + CELL_SIZE / 2;
@@ -4006,7 +4020,7 @@ var Renderer = class {
           drawBuildPreview(ctx, this.input.buildMode, previewWorldX, previewWorldY, state2.selfPos.x, state2.selfPos.y, state2.selfSource);
         }
       } else if (isGamepad) {
-        this.drawBuildRangeOverlay(ctx, state2.selfPos.x, state2.selfPos.y, canvas.width, canvas.height, cam);
+        this.drawBuildRangeOverlay(ctx, state2.selfPos.x, state2.selfPos.y, W, H, cam);
         const gpWorldX = state2.selfPos.x + this.input.gamepadBuildOffsetX;
         const gpWorldY = state2.selfPos.y + this.input.gamepadBuildOffsetY;
         drawBuildPreview(ctx, this.input.buildMode, gpWorldX, gpWorldY, state2.selfPos.x, state2.selfPos.y, state2.selfSource);
@@ -4015,16 +4029,16 @@ var Renderer = class {
       }
     }
     this.drawNPCs(ctx);
-    drawProjectiles(ctx, state2, cam.x, cam.y, canvas.width, canvas.height);
-    drawEntities(ctx, state2, cam.x, cam.y, canvas.width, canvas.height);
+    drawProjectiles(ctx, state2, cam.x, cam.y, W, H);
+    drawEntities(ctx, state2, cam.x, cam.y, W, H);
     this.updateAndDrawParticles(ctx);
     ctx.restore();
-    drawHud(ctx, state2, canvas);
-    this.drawNightOverlay(ctx, canvas);
+    drawHud(ctx, state2, W, H);
+    this.drawNightOverlay(ctx);
     const pb = getPhaseBlend();
-    drawWeather(ctx, canvas.width, canvas.height, pb, cam.x, cam.y);
+    drawWeather(ctx, W, H, pb, cam.x, cam.y);
     if (this.input.touch?.enabled) {
-      this.input.touch.draw(ctx, canvas);
+      this.input.touch.draw(ctx, this.canvas);
     }
   }
   drawSafeZone(ctx) {
@@ -4305,7 +4319,7 @@ var Renderer = class {
     ctx.fill();
     ctx.restore();
   }
-  drawNightOverlay(ctx, canvas) {
+  drawNightOverlay(ctx) {
     const pb = getPhaseBlend();
     const tints = {
       day: [0, 0, 0, 0],
@@ -4321,7 +4335,7 @@ var Renderer = class {
     const a = cur[3] + (next[3] - cur[3]) * pb.blend;
     if (a > 5e-3) {
       ctx.fillStyle = `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b)},${a.toFixed(3)})`;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, this.logicalW, this.logicalH);
     }
   }
 };
@@ -5723,15 +5737,15 @@ function setupCanvasTouch(input2, state2, conn2) {
     const t = e.changedTouches[0];
     if (input2.buildMode || input2.demolishMode) {
       const margin2 = 120;
-      if (t.clientX < margin2 || t.clientX > canvas.width - margin2) return;
+      if (t.clientX < margin2 || t.clientX > window.innerWidth - margin2) return;
       e.preventDefault();
       if (input2.demolishMode && input2.onDemolish) {
         input2.onDemolish(t.clientX, t.clientY);
         return;
       }
       if (input2.buildMode) {
-        const worldX = t.clientX - canvas.width / 2 + state2.cameraX;
-        const worldY = t.clientY - canvas.height / 2 + state2.cameraY;
+        const worldX = t.clientX - window.innerWidth / 2 + state2.cameraX;
+        const worldY = t.clientY - window.innerHeight / 2 + state2.cameraY;
         const cellX = Math.floor(worldX / CELL_SIZE);
         const cellY = Math.floor(worldY / CELL_SIZE);
         const prev = input2.mobileBuildPreview;
@@ -5747,12 +5761,12 @@ function setupCanvasTouch(input2, state2, conn2) {
       return;
     }
     const margin = 140;
-    if (t.clientX > margin && t.clientX < canvas.width - margin) {
+    if (t.clientX > margin && t.clientX < window.innerWidth - margin) {
       longPressX = t.clientX;
       longPressY = t.clientY;
       longPressTimer = setTimeout(() => {
-        const worldX = longPressX - canvas.width / 2 + state2.cameraX;
-        const worldY = longPressY - canvas.height / 2 + state2.cameraY;
+        const worldX = longPressX - window.innerWidth / 2 + state2.cameraX;
+        const worldY = longPressY - window.innerHeight / 2 + state2.cameraY;
         let bestDist = 60;
         let bestEntity = null;
         for (const [, ent] of state2.entities) {
@@ -6445,8 +6459,8 @@ function startGameLoop() {
     icon.textContent = container.classList.contains("collapsed") ? "\u25B6" : "\u25BC";
   });
   input.onCtrlClick = (screenX, screenY) => {
-    const worldX = screenX - canvas.width / 2 + state.cameraX;
-    const worldY = screenY - canvas.height / 2 + state.cameraY;
+    const worldX = screenX - window.innerWidth / 2 + state.cameraX;
+    const worldY = screenY - window.innerHeight / 2 + state.cameraY;
     let bestDist = 60;
     let bestEntity = null;
     for (const [, e] of state.entities) {
@@ -6510,8 +6524,8 @@ function startGameLoop() {
     }
   };
   input.onBuild = (btype, screenX, screenY) => {
-    const worldX = screenX - canvas.width / 2 + state.cameraX;
-    const worldY = screenY - canvas.height / 2 + state.cameraY;
+    const worldX = screenX - window.innerWidth / 2 + state.cameraX;
+    const worldY = screenY - window.innerHeight / 2 + state.cameraY;
     const cellX = Math.floor(worldX / CELL_SIZE);
     const cellY = Math.floor(worldY / CELL_SIZE);
     conn.send({
@@ -6522,8 +6536,8 @@ function startGameLoop() {
     });
   };
   input.onDemolish = (screenX, screenY) => {
-    const worldX = screenX - canvas.width / 2 + state.cameraX;
-    const worldY = screenY - canvas.height / 2 + state.cameraY;
+    const worldX = screenX - window.innerWidth / 2 + state.cameraX;
+    const worldY = screenY - window.innerHeight / 2 + state.cameraY;
     let bestDist = 48;
     let bestId = null;
     for (const [, e] of state.entities) {
