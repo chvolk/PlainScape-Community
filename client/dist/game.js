@@ -3226,8 +3226,6 @@ function drawBuildings(ctx, state2, mouseWorldX, mouseWorldY) {
         ctx.fillRect(-half, -half, CELL_SIZE, CELL_SIZE);
         ctx.fillStyle = turretShirt;
         ctx.fillRect(-half + 3, -half + 3, CELL_SIZE - 6, CELL_SIZE - 6);
-        ctx.fillStyle = "#222";
-        ctx.fillRect(-half + 6, -half + 6, CELL_SIZE - 12, CELL_SIZE - 12);
         const facing = entity.facing ?? 0;
         ctx.save();
         ctx.rotate(facing);
@@ -3251,9 +3249,13 @@ function drawBuildings(ctx, state2, mouseWorldX, mouseWorldY) {
         ctx.closePath();
         ctx.fill();
         ctx.restore();
+        ctx.fillStyle = "#111";
+        ctx.beginPath();
+        ctx.arc(0, 0, 7, 0, Math.PI * 2);
+        ctx.fill();
         ctx.fillStyle = "#ff4444";
         ctx.beginPath();
-        ctx.arc(0, 0, 3, 0, Math.PI * 2);
+        ctx.arc(0, 0, 2.5, 0, Math.PI * 2);
         ctx.fill();
         break;
       }
@@ -3269,12 +3271,12 @@ function drawBuildings(ctx, state2, mouseWorldX, mouseWorldY) {
         ctx.fillStyle = sheetColor;
         ctx.fillRect(-half + 3, -half + 8, CELL_SIZE - 6, CELL_SIZE - 14);
         ctx.fillStyle = blanketColor;
-        ctx.fillRect(-half + 3, -half + 12, CELL_SIZE - 6, CELL_SIZE - 16);
+        ctx.fillRect(-half + 3, -half + 16, CELL_SIZE - 6, CELL_SIZE - 20);
         ctx.strokeStyle = "rgba(0,0,0,0.15)";
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(-half + 4, -half + 12);
-        ctx.lineTo(half - 4, -half + 12);
+        ctx.moveTo(-half + 4, -half + 16);
+        ctx.lineTo(half - 4, -half + 16);
         ctx.stroke();
         ctx.fillStyle = "#f0ebe0";
         ctx.fillRect(-half + 5, -half + 4, CELL_SIZE - 10, 6);

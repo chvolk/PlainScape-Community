@@ -135,7 +135,7 @@ var PROJECTILE_SIZE = 6;
 var PROJECTILE_TTL = 3e3;
 var NO_BUILD_BUFFER = 130;
 var WALL_HP = 18;
-var GATE_HP = 15;
+var GATE_HP = 9;
 var TURRET_HP = 20;
 var BED_HP = 10;
 var BUILDING_REGEN_RATE = 1;
@@ -7703,4 +7703,3 @@ function loadEnv(filePath) {
   } catch {
   }
 }
-// v1.2.0-fix1
