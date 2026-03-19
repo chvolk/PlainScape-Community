@@ -4851,6 +4851,85 @@ function startServer(world2) {
           return;
         }
       }
+      if (req.method === "GET" && urlPath === "/api/patreon/authorize") {
+        const clientId = process.env.PATREON_CLIENT_ID;
+        if (!clientId) {
+          res.writeHead(500, { "Content-Type": "text/plain" });
+          res.end("Patreon OAuth not configured");
+          return;
+        }
+        const redirectUri = encodeURIComponent(`https://${req.headers.host || "plainscape.world"}/api/patreon/callback`);
+        const patreonUrl = `https://www.patreon.com/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${redirectUri}&scope=identity%20identity.memberships`;
+        res.writeHead(302, { "Location": patreonUrl });
+        res.end();
+        return;
+      }
+      if (req.method === "GET" && urlPath === "/api/patreon/callback") {
+        const clientId = process.env.PATREON_CLIENT_ID;
+        const clientSecret = process.env.PATREON_CLIENT_SECRET;
+        if (!clientId || !clientSecret) {
+          res.writeHead(500, { "Content-Type": "text/plain" });
+          res.end("Patreon OAuth not configured");
+          return;
+        }
+        const url = new URL(req.url || "/", `https://${req.headers.host || "plainscape.world"}`);
+        const code = url.searchParams.get("code");
+        if (!code) {
+          res.writeHead(400, { "Content-Type": "text/plain" });
+          res.end("Missing authorization code");
+          return;
+        }
+        try {
+          const redirectUri = `https://${req.headers.host || "plainscape.world"}/api/patreon/callback`;
+          const tokenRes = await fetch("https://www.patreon.com/api/oauth2/token", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+              code,
+              grant_type: "authorization_code",
+              client_id: clientId,
+              client_secret: clientSecret,
+              redirect_uri: redirectUri
+            }).toString()
+          });
+          if (!tokenRes.ok) {
+            const errText = await tokenRes.text();
+            console.error("[Patreon] Token exchange failed:", errText);
+            res.writeHead(400, { "Content-Type": "text/html" });
+            res.end('<html><body style="background:#1a1a2e;color:#ff4444;font-family:sans-serif;padding:40px;text-align:center"><h2>Patreon authorization failed</h2><p>Could not verify your Patreon account. Please try again or contact support.</p></body></html>');
+            return;
+          }
+          const tokenData = await tokenRes.json();
+          const accessToken = tokenData.access_token;
+          if (!accessToken) {
+            res.writeHead(400, { "Content-Type": "text/html" });
+            res.end('<html><body style="background:#1a1a2e;color:#ff4444;font-family:sans-serif;padding:40px;text-align:center"><h2>No access token received</h2></body></html>');
+            return;
+          }
+          const valid = await validatePatreonKey(accessToken);
+          res.writeHead(200, { "Content-Type": "text/html" });
+          if (valid) {
+            res.end(`<html><body style="background:#1a1a2e;color:#ddd;font-family:sans-serif;padding:40px;max-width:600px;margin:0 auto;text-align:center">
+              <h2 style="color:#7ec87e">Patreon Verified!</h2>
+              <p>Your Patreon key for the server .env file:</p>
+              <div style="background:#12122a;border:1px solid #2a2a4a;border-radius:8px;padding:16px;margin:16px 0;word-break:break-all;font-family:monospace;font-size:13px;color:#f0c040;user-select:all">${accessToken}</div>
+              <p style="color:#888;font-size:13px">Copy this token and paste it as <code style="color:#f0c040">PATREON_KEY</code> in your server's .env file or admin console Configuration tab.</p>
+              <p style="color:#888;font-size:12px;margin-top:24px">You can close this page now.</p>
+            </body></html>`);
+          } else {
+            res.end(`<html><body style="background:#1a1a2e;color:#ddd;font-family:sans-serif;padding:40px;max-width:600px;margin:0 auto;text-align:center">
+              <h2 style="color:#ff4444">Not an Active Patron</h2>
+              <p>Your Patreon account was verified, but you don't have an active membership.</p>
+              <p style="color:#888;font-size:13px">Please subscribe to the PlainScape Patreon to get a server key.</p>
+            </body></html>`);
+          }
+        } catch (err) {
+          console.error("[Patreon] OAuth callback error:", err);
+          res.writeHead(500, { "Content-Type": "text/html" });
+          res.end('<html><body style="background:#1a1a2e;color:#ff4444;font-family:sans-serif;padding:40px;text-align:center"><h2>Something went wrong</h2><p>Please try again.</p></body></html>');
+        }
+        return;
+      }
       if (req.method === "GET" && urlPath === "/api/servers") {
         const list = registry.toPublicList();
         list.unshift({
@@ -7077,6 +7156,15 @@ function appHtml(serverName) {
           var hint = document.createElement('div');
           hint.className = 'config-hint';
           hint.textContent = f.hint;
+          if (f.link) {
+            hint.appendChild(document.createTextNode(' '));
+            var linkEl = document.createElement('a');
+            linkEl.href = f.link.url;
+            linkEl.target = '_blank';
+            linkEl.textContent = f.link.text;
+            linkEl.style.cssText = 'color:var(--green);text-decoration:underline;';
+            hint.appendChild(linkEl);
+          }
           labelWrap.appendChild(hint);
         }
         var input = document.createElement('input');
@@ -7578,7 +7666,7 @@ function findProjectRoot() {
   }
   return fromDir2;
 }
-var SENSITIVE_KEYS = ["ANTHROPIC_API_KEY", "PATREON_KEY", "DEMO_KEY", "REGISTRY_SECRET", "GITHUB_TOKEN", "ADMIN_CONSOLE_PASSWORD"];
+var SENSITIVE_KEYS = ["ANTHROPIC_API_KEY", "PATREON_KEY", "DEMO_KEY", "REGISTRY_SECRET", "GITHUB_TOKEN", "ADMIN_CONSOLE_PASSWORD", "PATREON_CLIENT_ID", "PATREON_CLIENT_SECRET"];
 function startAdminConsole(world2) {
   const port = parseInt(process.env.ADMIN_PORT || "4801", 10);
   const password = process.env.ADMIN_CONSOLE_PASSWORD || "";
@@ -7753,7 +7841,7 @@ function startAdminConsole(world2) {
           { key: "CHAMPION_HOUR", label: "Champion Hour", value: envMap["CHAMPION_HOUR"] || "18", placeholder: "18", category: "Timing", type: "number", hint: "Hour (0-23) when the daily champion is selected" },
           { key: "RESET_DAY", label: "Weekly Reset Day", value: envMap["RESET_DAY"] || "0", placeholder: "0", category: "Timing", type: "number", hint: "0=Sun, 1=Mon, ... 6=Sat" },
           { key: "RESET_HOUR", label: "Weekly Reset Hour", value: envMap["RESET_HOUR"] || "20", placeholder: "20", category: "Timing", type: "number", hint: "Hour (0-23) for weekly reset" },
-          { key: "PATREON_KEY", label: "Patreon Key", value: envMap["PATREON_KEY"] ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" : "", placeholder: "", category: "Registry", type: "secret", hint: "Required to appear in the server browser" },
+          { key: "PATREON_KEY", label: "Patreon Key", value: envMap["PATREON_KEY"] ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" : "", placeholder: "", category: "Registry", type: "secret", hint: "Required to appear in the server browser", link: { url: "https://plainscape.world/api/patreon/authorize", text: "Get Patreon Key" } },
           { key: "DEMO_KEY", label: "Demo Key", value: envMap["DEMO_KEY"] ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" : "", placeholder: "", category: "Registry", type: "secret", hint: "Alternative to Patreon key for testing" },
           { key: "SERVER_HOST", label: "Public IP", value: envMap["SERVER_HOST"] || "", placeholder: "Auto-detected", category: "Registry", type: "text", hint: "Your public IP for the server browser. Auto-detected if empty." },
           { key: "ADMIN_PORT", label: "Admin Console Port", value: envMap["ADMIN_PORT"] || "4801", placeholder: "4801", category: "Admin", type: "number" },
