@@ -3286,9 +3286,19 @@ function drawBuildings(ctx, state2, mouseWorldX, mouseWorldY) {
         ctx.fillRect(-half + 1, -half + 1, CELL_SIZE - 2, 3);
         ctx.fillStyle = "#4a2a10";
         ctx.fillRect(-half + 1, half - 4, CELL_SIZE - 2, 3);
+        let bedAoeColor = "rgba(200, 200, 200, 0.2)";
+        if (entity.ownerId === state2.myId) {
+          bedAoeColor = "rgba(100, 200, 100, 0.3)";
+        } else if (entity.ownerId !== void 0) {
+          const myEntity = state2.entities.get(state2.myId);
+          const ownerEntity = state2.entities.get(entity.ownerId);
+          if (myEntity?.partyId && ownerEntity?.partyId && myEntity.partyId === ownerEntity.partyId) {
+            bedAoeColor = "rgba(80, 140, 255, 0.3)";
+          }
+        }
         ctx.beginPath();
         ctx.arc(0, 0, BED_HEAL_RADIUS, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(100, 200, 255, 0.25)";
+        ctx.strokeStyle = bedAoeColor;
         ctx.lineWidth = 1;
         ctx.setLineDash([4, 4]);
         ctx.stroke();

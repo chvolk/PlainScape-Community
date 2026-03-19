@@ -935,10 +935,15 @@ function onPlayerDisconnect(world2, player) {
 var DISTANCE_BONUS_EDGE = SAFE_ZONE_RADIUS + NO_BUILD_BUFFER;
 var DISTANCE_BONUS_STEP = 700;
 var DISTANCE_BONUS_PER_STEP = 2;
+var DISTANCE_BONUS_CAP = 25;
 function distanceBonus(x, y) {
   const dist = Math.hypot(x, y) - DISTANCE_BONUS_EDGE;
   if (dist <= 0) return 0;
-  return Math.floor(dist / DISTANCE_BONUS_STEP) * DISTANCE_BONUS_PER_STEP;
+  return Math.min(DISTANCE_BONUS_CAP, Math.floor(dist / DISTANCE_BONUS_STEP) * DISTANCE_BONUS_PER_STEP);
+}
+function isAtDistanceCap(x, y) {
+  const dist = Math.hypot(x, y) - DISTANCE_BONUS_EDGE;
+  return dist > 0 && Math.floor(dist / DISTANCE_BONUS_STEP) * DISTANCE_BONUS_PER_STEP >= DISTANCE_BONUS_CAP;
 }
 function awardSource(player, amount, world2) {
   if (world2 && player.partyId !== null) {
@@ -2741,8 +2746,10 @@ function getDirectionalSpawnPos(player) {
   const mdy = player.getMoveDy();
   const isMoving = mdx !== 0 || mdy !== 0;
   const moveAngle = isMoving ? Math.atan2(mdy, mdx) : player.facing;
+  const atCap = isAtDistanceCap(player.x, player.y);
+  const scale = atCap ? 0.5 : 1;
   if (isMoving && Math.random() < 0.3) {
-    const dist2 = 300 + Math.random() * 200;
+    const dist2 = (300 + Math.random() * 200) * scale;
     const spread2 = (Math.random() - 0.5) * Math.PI * 0.3;
     const angle2 = moveAngle + spread2;
     return {
@@ -2750,7 +2757,7 @@ function getDirectionalSpawnPos(player) {
       y: player.y + Math.sin(angle2) * dist2
     };
   }
-  const dist = 400 + Math.random() * 300;
+  const dist = (400 + Math.random() * 300) * scale;
   const spread = (Math.random() - 0.5) * Math.PI * 0.8;
   const angle = moveAngle + spread;
   return {
