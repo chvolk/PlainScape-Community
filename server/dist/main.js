@@ -151,8 +151,8 @@ var MAX_BUILD_RANGE = 5 * CELL_SIZE;
 var SOURCE_WALK_INTERVAL = 5e3;
 var SOURCE_WALK_AMOUNT = 1;
 var SOURCE_DEATH_AMOUNT = 3;
-var SOURCE_LION_KILL_AMOUNT = 7;
-var SOURCE_GHOST_KILL_AMOUNT = 7;
+var SOURCE_LION_KILL_AMOUNT = 4;
+var SOURCE_GHOST_KILL_AMOUNT = 4;
 var SOURCE_TRANSITION_BONUS = 2;
 var SOURCE_PLAYER_KILL_AMOUNT = 20;
 var SOURCE_BUILDING_DESTROY = 5;
@@ -933,7 +933,7 @@ function onPlayerDisconnect(world2, player) {
 
 // server/src/systems/CombatHelpers.ts
 var DISTANCE_BONUS_EDGE = SAFE_ZONE_RADIUS + NO_BUILD_BUFFER;
-var DISTANCE_BONUS_STEP = 500;
+var DISTANCE_BONUS_STEP = 700;
 var DISTANCE_BONUS_PER_STEP = 2;
 function distanceBonus(x, y) {
   const dist = Math.hypot(x, y) - DISTANCE_BONUS_EDGE;
@@ -1209,9 +1209,26 @@ function tickCombat(world2) {
         player.lastHealTime = now;
       }
     }
-    if (player.bedX !== null && player.bedY !== null && player.hp < player.maxHp) {
-      const distToBed = Math.hypot(player.x - player.bedX, player.y - player.bedY);
-      if (distToBed <= BED_HEAL_RADIUS && now - player.lastBedHealTime >= BED_HEAL_INTERVAL) {
+    if (player.hp < player.maxHp && now - player.lastBedHealTime >= BED_HEAL_INTERVAL) {
+      let nearBed = false;
+      if (player.bedX !== null && player.bedY !== null) {
+        if (Math.hypot(player.x - player.bedX, player.y - player.bedY) <= BED_HEAL_RADIUS) {
+          nearBed = true;
+        }
+      }
+      if (!nearBed && player.partyId !== null) {
+        for (const [, b] of world2.buildingsById) {
+          if (b.btype !== "bed" || b.markedForRemoval) continue;
+          if (b.ownerId === player.id) continue;
+          const bedOwner = world2.players.get(b.ownerId);
+          if (!bedOwner || bedOwner.partyId !== player.partyId) continue;
+          if (Math.hypot(player.x - b.x, player.y - b.y) <= BED_HEAL_RADIUS) {
+            nearBed = true;
+            break;
+          }
+        }
+      }
+      if (nearBed) {
         player.hp = Math.min(player.maxHp, player.hp + BED_HEAL_AMOUNT);
         player.lastBedHealTime = now;
       }
@@ -2557,7 +2574,7 @@ function tickBuildingRegen(world2) {
   const now = Date.now();
   for (const [, building] of world2.buildingsById) {
     if (building.markedForRemoval) continue;
-    if (building.btype === "bed") continue;
+    if (building.btype !== "wall") continue;
     if (building.hp >= building.maxHp) continue;
     if (now - building.lastRegenTime < BUILDING_REGEN_INTERVAL) continue;
     building.hp = Math.min(building.maxHp, building.hp + BUILDING_REGEN_RATE);
@@ -5304,7 +5321,7 @@ function startServer(world2) {
         case "withdraw": {
           if (!player || player.dead) return;
           const withdrawAmt = Math.floor(msg.amount);
-          if (withdrawAmt <= 0 || withdrawAmt > player.bankedSource) return;
+          if (withdrawAmt < 10 || withdrawAmt > player.bankedSource) return;
           const distToBanker2 = Math.hypot(player.x - BANKER_POS.x, player.y - BANKER_POS.y);
           if (distToBanker2 > BANK_NPC_RANGE) {
             world2.sendEvent(player, "source", "Too far from the Banker.");
