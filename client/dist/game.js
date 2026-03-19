@@ -5216,6 +5216,7 @@ function setupNpcPanels(conn2, input2, state2) {
     if (e.key.toLowerCase() !== "e") return;
     if (input2.menuOpen || input2.chatOpen || input2.modalOpen || input2.statsOpen) return;
     if (state2.selfDead) return;
+    if (state2.myId === 0) return;
     if (bankOpen) {
       closeBankPanel();
       return;

@@ -1,5 +1,5 @@
 // server/src/main.ts
-import path7 from "path";
+import path8 from "path";
 import { readFileSync as readFileSync2 } from "fs";
 
 // server/src/utils/IdGenerator.ts
@@ -4992,6 +4992,16 @@ function startServer(world2) {
         return;
       }
     }
+    if (req.method === "GET" && urlPath === "/privacy") {
+      res.writeHead(200, { "Content-Type": "text/html" });
+      res.end(legalPage("Privacy Policy", privacyContent()));
+      return;
+    }
+    if (req.method === "GET" && urlPath === "/terms") {
+      res.writeHead(200, { "Content-Type": "text/html" });
+      res.end(legalPage("Terms & Conditions", termsContent()));
+      return;
+    }
     if (req.method === "GET" && urlPath === "/api/ai-prompt") {
       const rulesPath = path4.resolve(import.meta.dirname, "../../claude-rules.md");
       try {
@@ -5658,6 +5668,79 @@ function broadcastSuggestions(world2) {
     });
   }
 }
+function legalPage(title, body) {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} \u2014 PlainScape</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{background:#1a1a2e;color:#ccc;font-family:'Segoe UI',system-ui,sans-serif;line-height:1.7;padding:40px 20px}
+.wrap{max-width:720px;margin:0 auto}h1{color:#7ec87e;font-size:24px;margin-bottom:8px}
+.updated{color:#888;font-size:12px;margin-bottom:32px}h2{color:#f0c040;font-size:16px;margin:28px 0 8px;border-bottom:1px solid rgba(255,255,255,0.08);padding-bottom:4px}
+p,li{font-size:14px;margin-bottom:10px;color:#bbb}ul{margin-left:20px;margin-bottom:12px}
+strong{color:#ddd}code{color:#f0c040;background:rgba(240,192,64,0.1);padding:1px 4px;border-radius:3px;font-size:13px}
+a{color:#7ec87e}.back{display:inline-block;margin-top:32px;color:#888;font-size:13px;text-decoration:none}.back:hover{color:#ddd}</style></head>
+<body><div class="wrap"><h1>${title}</h1><div class="updated">Last updated: March 19, 2026</div>${body}<a class="back" href="/">\u2190 Back to PlainScape</a></div></body></html>`;
+}
+function privacyContent() {
+  return `
+<h2>What We Collect</h2>
+<p>PlainScape collects minimal data necessary to operate the game:</p>
+<ul>
+<li><strong>Username</strong> \u2014 chosen by you, stored locally and on the server for identification</li>
+<li><strong>Player token</strong> \u2014 a random UUID stored in your browser's localStorage to identify your account across sessions</li>
+<li><strong>IP address</strong> \u2014 logged for ban enforcement and abuse prevention; not shared with third parties</li>
+<li><strong>Browser fingerprint</strong> \u2014 a hash used alongside IP for ban enforcement</li>
+<li><strong>Game data</strong> \u2014 Source earned, stats, buildings, and other in-game state stored in a server-side SQLite database</li>
+</ul>
+
+<h2>Patreon Integration</h2>
+<p>If you authenticate via Patreon to obtain a server key, we receive your Patreon membership status through the Patreon OAuth API. We do not store your Patreon credentials \u2014 only the resulting access token, which you provide to your own server.</p>
+
+<h2>AI Rule System</h2>
+<p>When the daily champion submits a rule, the rule text is sent to the Anthropic Claude API for processing and implementation. The rule text and resulting code changes are stored on the server. No personal data beyond the champion's username is included in API requests.</p>
+
+<h2>Community Servers</h2>
+<p>Community-hosted PlainScape servers are operated by third parties. Each server operator controls their own data. PlainScape (the project) is not responsible for data handling on community servers. The server browser at plainscape.world only stores the server name, IP, port, and player count submitted via heartbeat.</p>
+
+<h2>Cookies & Local Storage</h2>
+<p>PlainScape uses browser localStorage to store your player token, username, character colors, and game preferences. No tracking cookies are used. The admin console uses a session cookie for authentication.</p>
+
+<h2>Data Retention</h2>
+<p>Game data is reset weekly. Username reservations expire after 6 weeks of inactivity. Server operators can clear all data at any time via the <code>/freeall</code> command.</p>
+
+<h2>Contact</h2>
+<p>For questions about data handling, contact us via the <a href="https://github.com/chvolk/PlainScape-Community/issues" target="_blank">GitHub issues page</a>.</p>`;
+}
+function termsContent() {
+  return `
+<h2>Acceptance</h2>
+<p>By playing PlainScape or hosting a PlainScape community server, you agree to these terms.</p>
+
+<h2>The Game</h2>
+<p>PlainScape is a free, open-source multiplayer game provided as-is. We make no guarantees about uptime, data persistence, or game balance. The game resets weekly \u2014 progress is temporary by design.</p>
+
+<h2>AI Rule System \u2014 Important Disclaimer</h2>
+<p><strong>The AI rule implementation system uses the Anthropic Claude API to autonomously read, modify, and execute code on the server machine.</strong> Community servers that enable this feature run AI-generated code changes with the <code>--dangerously-skip-permissions</code> flag, which grants the AI broad access to the server's file system and the ability to run shell commands.</p>
+<p><strong>Neither PlainScape nor Anthropic are responsible for any damage, data loss, security issues, or other consequences resulting from the AI rule system's actions on your machine.</strong> By enabling the AI rule system on your server, you accept full responsibility for its behavior.</p>
+<p>We strongly recommend:</p>
+<ul>
+<li>Running community servers in isolated environments (containers, VMs, or dedicated hosting)</li>
+<li>Reviewing the <code>claude-rules.md</code> guardrails and adding restrictions appropriate to your setup</li>
+<li>Keeping regular backups of any important data on the same machine</li>
+</ul>
+
+<h2>Community Servers</h2>
+<p>Community server operators are responsible for their own servers, including compliance with applicable laws, data protection, and content moderation. PlainScape provides the software; operators provide the infrastructure and oversight.</p>
+
+<h2>Player Conduct</h2>
+<p>PlainScape is a PvP survival game \u2014 combat, raiding, and competition are core mechanics. However, real-world harassment, hate speech, and abuse through the chat system are not tolerated. Server operators may ban players at their discretion.</p>
+
+<h2>Intellectual Property</h2>
+<p>PlainScape is open source. The community server package is distributed under the terms of its repository. Player-submitted rules become part of the game code and are not individually owned.</p>
+
+<h2>Limitation of Liability</h2>
+<p>PlainScape is provided "as is" without warranties of any kind. To the maximum extent permitted by law, the creators of PlainScape shall not be liable for any damages arising from the use of the game, the AI rule system, or community server software.</p>
+
+<h2>Changes</h2>
+<p>These terms may be updated at any time. Continued use of PlainScape constitutes acceptance of the updated terms.</p>`;
+}
 
 // server/src/db/GameDatabase.ts
 import { createRequire } from "module";
@@ -6129,6 +6212,60 @@ function getPhoenixDayOfWeek(now) {
 }
 
 // server/src/registry/HeartbeatSender.ts
+import fs3 from "fs";
+import path6 from "path";
+var autoForkAttempted = false;
+async function autoForkCommunityRepo(token) {
+  if (autoForkAttempted) return;
+  autoForkAttempted = true;
+  try {
+    console.log("[AutoFork] No GITHUB_REPO set \u2014 forking PlainScape-Community...");
+    const forkRes = await fetch("https://api.github.com/repos/chvolk/PlainScape-Community/forks", {
+      method: "POST",
+      headers: {
+        "Authorization": `token ${token}`,
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "PlainScape-Server"
+      }
+    });
+    if (!forkRes.ok) {
+      const err = await forkRes.text();
+      if (forkRes.status !== 202) {
+        console.error("[AutoFork] Fork failed:", err);
+        return;
+      }
+    }
+    const forkData = await forkRes.json();
+    const repoName = forkData.full_name;
+    if (!repoName) {
+      console.error("[AutoFork] No repo name in fork response");
+      return;
+    }
+    console.log(`[AutoFork] Forked to ${repoName}`);
+    process.env.GITHUB_REPO = repoName;
+    const envPath = path6.resolve(import.meta.dirname, "../../.env");
+    try {
+      let envContent = "";
+      try {
+        envContent = fs3.readFileSync(envPath, "utf-8");
+      } catch {
+      }
+      if (/^GITHUB_REPO=.*$/m.test(envContent)) {
+        envContent = envContent.replace(/^GITHUB_REPO=.*$/m, `GITHUB_REPO=${repoName}`);
+      } else {
+        envContent += `
+GITHUB_REPO=${repoName}
+`;
+      }
+      fs3.writeFileSync(envPath, envContent, "utf-8");
+      console.log(`[AutoFork] Saved GITHUB_REPO=${repoName} to .env`);
+    } catch {
+      console.warn("[AutoFork] Could not write to .env \u2014 set GITHUB_REPO manually");
+    }
+  } catch (err) {
+    console.error("[AutoFork] Error:", err);
+  }
+}
 function startHeartbeat(world2) {
   const patreonKey = process.env.PATREON_KEY;
   const demoKey = process.env.DEMO_KEY;
@@ -6185,6 +6322,9 @@ function startHeartbeat(world2) {
           process.env.SERVER_CODE = data.code;
           console.log(`[Heartbeat] Server code assigned: ${data.code}`);
         }
+        if (process.env.GITHUB_TOKEN && !process.env.GITHUB_REPO) {
+          autoForkCommunityRepo(process.env.GITHUB_TOKEN);
+        }
       }
     } catch (err) {
       console.warn("[Heartbeat] Failed to reach registry:", err.message);
@@ -6198,8 +6338,8 @@ function startHeartbeat(world2) {
 // server/src/admin/AdminConsole.ts
 import { execSync as execSync4, spawn } from "child_process";
 import http2 from "http";
-import fs3 from "fs";
-import path6 from "path";
+import fs4 from "fs";
+import path7 from "path";
 
 // server/src/admin/adminPage.ts
 function adminPageHtml(serverName, showLogin) {
@@ -7654,14 +7794,14 @@ function appHtml(serverName) {
 // server/src/admin/AdminConsole.ts
 var PROJECT_ROOT5 = findProjectRoot();
 function findProjectRoot() {
-  const fromDir = path6.resolve(import.meta.dirname, "../../..");
-  const fromDir2 = path6.resolve(import.meta.dirname, "../..");
+  const fromDir = path7.resolve(import.meta.dirname, "../../..");
+  const fromDir2 = path7.resolve(import.meta.dirname, "../..");
   try {
-    if (fs3.existsSync(path6.join(fromDir2, "client"))) return fromDir2;
+    if (fs4.existsSync(path7.join(fromDir2, "client"))) return fromDir2;
   } catch {
   }
   try {
-    if (fs3.existsSync(path6.join(fromDir, "client"))) return fromDir;
+    if (fs4.existsSync(path7.join(fromDir, "client"))) return fromDir;
   } catch {
   }
   return fromDir2;
@@ -7684,9 +7824,9 @@ function startAdminConsole(world2) {
     const match = cookie.match(/admin_session=([a-z0-9]+)/);
     return match ? validSessions.has(match[1]) : false;
   }
-  const envPath = path6.resolve(PROJECT_ROOT5, ".env");
-  const rulesPath = path6.resolve(PROJECT_ROOT5, "claude-rules.md");
-  const logoPath = path6.resolve(PROJECT_ROOT5, "client/logo.png");
+  const envPath = path7.resolve(PROJECT_ROOT5, ".env");
+  const rulesPath = path7.resolve(PROJECT_ROOT5, "claude-rules.md");
+  const logoPath = path7.resolve(PROJECT_ROOT5, "client/logo.png");
   const serverStartTime = Date.now();
   function readBody(req) {
     return new Promise((resolve, reject) => {
@@ -7715,7 +7855,7 @@ function startAdminConsole(world2) {
   function readCurrentSensitiveValues() {
     const values = {};
     try {
-      const content = fs3.readFileSync(envPath, "utf-8");
+      const content = fs4.readFileSync(envPath, "utf-8");
       for (const key of SENSITIVE_KEYS) {
         const m = content.match(new RegExp(`^${key}=(.+)$`, "m"));
         if (m) values[key] = m[1];
@@ -7737,7 +7877,7 @@ function startAdminConsole(world2) {
       }
       if (url.pathname === "/logo.png") {
         try {
-          const img = fs3.readFileSync(logoPath);
+          const img = fs4.readFileSync(logoPath);
           res.writeHead(200, { "Content-Type": "image/png" });
           res.end(img);
         } catch {
@@ -7782,7 +7922,7 @@ function startAdminConsole(world2) {
         try {
           let currentVersion = "0.0.0";
           try {
-            const pkg = JSON.parse(fs3.readFileSync(path6.resolve(PROJECT_ROOT5, "package.json"), "utf-8"));
+            const pkg = JSON.parse(fs4.readFileSync(path7.resolve(PROJECT_ROOT5, "package.json"), "utf-8"));
             currentVersion = pkg.version || "0.0.0";
           } catch {
           }
@@ -7822,7 +7962,7 @@ function startAdminConsole(world2) {
       if (url.pathname === "/api/config" && method === "GET") {
         let envContent = "";
         try {
-          envContent = fs3.readFileSync(envPath, "utf-8");
+          envContent = fs4.readFileSync(envPath, "utf-8");
         } catch {
         }
         const envMap = parseEnvFile(envContent);
@@ -7860,7 +8000,7 @@ function startAdminConsole(world2) {
         const updates = body.config;
         let envContent = "";
         try {
-          envContent = fs3.readFileSync(envPath, "utf-8");
+          envContent = fs4.readFileSync(envPath, "utf-8");
         } catch {
         }
         const envMap = parseEnvFile(envContent);
@@ -7896,13 +8036,13 @@ function startAdminConsole(world2) {
             lines.push(`${key}=${value}`);
           }
         }
-        fs3.writeFileSync(envPath, lines.join("\n"), "utf-8");
+        fs4.writeFileSync(envPath, lines.join("\n"), "utf-8");
         json(res, { ok: true, message: "Configuration saved. Restart server to apply changes." });
         return;
       }
       if (url.pathname === "/api/env" && method === "GET") {
         try {
-          const content = fs3.readFileSync(envPath, "utf-8");
+          const content = fs4.readFileSync(envPath, "utf-8");
           const redacted = content.replace(
             /^(ANTHROPIC_API_KEY|PATREON_KEY|DEMO_KEY|REGISTRY_SECRET|GITHUB_TOKEN|ADMIN_CONSOLE_PASSWORD)=(.+)$/gm,
             (_, key, val) => `${key}=${"*".repeat(Math.min(val.length, 20))}`
@@ -7940,13 +8080,13 @@ ADMIN_CONSOLE_PASSWORD=${password}
             );
           }
         }
-        fs3.writeFileSync(envPath, finalContent, "utf-8");
+        fs4.writeFileSync(envPath, finalContent, "utf-8");
         json(res, { ok: true, message: "Saved. Restart server to apply changes." });
         return;
       }
       if (url.pathname === "/api/claude-rules" && method === "GET") {
         try {
-          const content = fs3.readFileSync(rulesPath, "utf-8");
+          const content = fs4.readFileSync(rulesPath, "utf-8");
           json(res, { content });
         } catch {
           json(res, { content: "" });
@@ -7959,7 +8099,7 @@ ADMIN_CONSOLE_PASSWORD=${password}
           err(res, "Invalid JSON");
           return;
         }
-        fs3.writeFileSync(rulesPath, body.content || "", "utf-8");
+        fs4.writeFileSync(rulesPath, body.content || "", "utf-8");
         json(res, { ok: true });
         return;
       }
@@ -7991,7 +8131,7 @@ ADMIN_CONSOLE_PASSWORD=${password}
         const makeAdmin = !!body.admin;
         let envContent = "";
         try {
-          envContent = fs3.readFileSync(envPath, "utf-8");
+          envContent = fs4.readFileSync(envPath, "utf-8");
         } catch {
         }
         const currentAdmins = parseAdminUsers(envContent);
@@ -8008,7 +8148,7 @@ ADMIN_CONSOLE_PASSWORD=${password}
 ${newLine}
 `;
         }
-        fs3.writeFileSync(envPath, envContent, "utf-8");
+        fs4.writeFileSync(envPath, envContent, "utf-8");
         process.env.ADMIN_USERS = [...currentAdmins].join(",");
         resetAdminCache();
         json(res, { ok: true, message: "Admin updated." });
@@ -8063,7 +8203,7 @@ ${newLine}
         const isModded = !!body.isModded;
         let envContent = "";
         try {
-          envContent = fs3.readFileSync(envPath, "utf-8");
+          envContent = fs4.readFileSync(envPath, "utf-8");
         } catch {
         }
         const newLine = `IS_MODDED=${isModded}`;
@@ -8074,7 +8214,7 @@ ${newLine}
 ${newLine}
 `;
         }
-        fs3.writeFileSync(envPath, envContent, "utf-8");
+        fs4.writeFileSync(envPath, envContent, "utf-8");
         process.env.IS_MODDED = String(isModded);
         json(res, { ok: true, isModded });
         return;
@@ -8280,8 +8420,8 @@ function parseEnvFile(content) {
 }
 
 // server/src/main.ts
-loadEnv(path7.resolve(import.meta.dirname, "../../.env"));
-var dbPath = process.env.DATABASE_PATH || path7.resolve(import.meta.dirname, "../../plainscape.db");
+loadEnv(path8.resolve(import.meta.dirname, "../../.env"));
+var dbPath = process.env.DATABASE_PATH || path8.resolve(import.meta.dirname, "../../plainscape.db");
 var db = new GameDatabase(dbPath);
 console.log(`[PlainScape] Database initialized at ${dbPath}`);
 var world = new World(db);
