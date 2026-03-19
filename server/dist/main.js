@@ -5252,6 +5252,47 @@ function startServer(world2) {
             console.log(`[Admin] ${player.username} freed username "${targetName}" \u2014 ${freed ? "success" : "not found"}`);
             break;
           }
+          if (chatText === "/weeklyreset" && isAdmin(player.username)) {
+            world2.db.performWeeklyReset();
+            for (const [, p] of world2.players) {
+              p.totalSourceGenerated = 0;
+              p.source = 0;
+              p.sourceFlushDirty = 0;
+              p.statLevels = defaultStatLevels();
+              p.bankedSource = 0;
+            }
+            world2.rules.length = 0;
+            world2.pendingWinnerUsername = null;
+            world2.broadcastAll({ type: "rules_update", rules: [], isAlert: false });
+            world2.broadcastAll({ type: "event", kind: "source", message: "Admin triggered weekly reset! All stats and rules cleared." });
+            console.log(`[Admin] ${player.username} triggered weekly reset`);
+            break;
+          }
+          if (chatText === "/freeall" && isAdmin(player.username)) {
+            const count = world2.db.freeAllUsernames();
+            for (const [, p] of world2.players) {
+              p.ws.send(JSON.stringify({ type: "event", kind: "source", message: "Server reset \u2014 all accounts cleared. Please rejoin." }));
+              p.ws.close();
+            }
+            player.send({ type: "event", kind: "source", message: `Freed ${count} usernames. All players kicked.` });
+            console.log(`[Admin] ${player.username} freed all ${count} usernames`);
+            break;
+          }
+          if (chatText === "/clearmap" && isAdmin(player.username)) {
+            const buildings = [...world2.buildingsById.values()];
+            for (const b of buildings) {
+              world2.removeBuilding(b);
+            }
+            world2.db.deleteAllBuildings();
+            for (const [, p] of world2.players) {
+              p.bedX = null;
+              p.bedY = null;
+              p.bedBuildingId = null;
+            }
+            world2.broadcastAll({ type: "event", kind: "source", message: "Admin cleared all structures from the map." });
+            console.log(`[Admin] ${player.username} cleared ${buildings.length} buildings from the map`);
+            break;
+          }
           if (chatText === "/shutdown" && isAdmin(player.username)) {
             world2.broadcastAll({ type: "event", kind: "source", message: "Server is shutting down..." });
             setTimeout(() => {
@@ -5289,6 +5330,9 @@ function startServer(world2) {
               "/autotime \u2014 Resume natural day/night cycle",
               "/stag spawn | /stag kill \u2014 Spawn or kill the Stag boss",
               "/freeuser <username> \u2014 Free a username reservation",
+              "/freeall \u2014 Free all usernames and kick all players",
+              "/clearmap \u2014 Remove all structures from the map",
+              "/weeklyreset \u2014 Perform the weekly reset now",
               "/shutdown \u2014 Gracefully stop the server",
               "/rule \u2014 Open the rule submission prompt"
             ];
@@ -5621,6 +5665,7 @@ var GameDatabase = class {
       deleteBuilding: this.db.prepare("DELETE FROM buildings WHERE id = ?"),
       getAllBuildings: this.db.prepare("SELECT * FROM buildings"),
       deleteAllBuildings: this.db.prepare("DELETE FROM buildings"),
+      deleteAllPlayers: this.db.prepare("DELETE FROM players"),
       getWorldState: this.db.prepare("SELECT value FROM world_state WHERE key = ?"),
       setWorldState: this.db.prepare("INSERT OR REPLACE INTO world_state (key, value) VALUES (?, ?)"),
       deleteWorldState: this.db.prepare("DELETE FROM world_state WHERE key = ?"),
@@ -5675,6 +5720,13 @@ var GameDatabase = class {
   freeUsername(username) {
     const result = this.stmts.deleteByUsername.run(username);
     return result.changes > 0;
+  }
+  freeAllUsernames() {
+    const result = this.stmts.deleteAllPlayers.run();
+    return result.changes;
+  }
+  deleteAllBuildings() {
+    this.stmts.deleteAllBuildings.run();
   }
   updateLastSeen(token, now) {
     this.stmts.updateLastSeen.run(now, token);
@@ -6726,6 +6778,9 @@ function appHtml(serverName) {
             <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/stag spawn</td><td>Spawn the Scorched Stag world boss</td></tr>
             <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/stag kill</td><td>Remove the Scorched Stag (no reward)</td></tr>
             <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/freeuser &lt;username&gt;</td><td>Release a username reservation (kicks if online)</td></tr>
+            <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/freeall</td><td>Free all usernames and kick all players</td></tr>
+            <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/clearmap</td><td>Remove all structures from the map</td></tr>
+            <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/weeklyreset</td><td>Perform the weekly reset immediately</td></tr>
             <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/shutdown</td><td>Gracefully stop the server</td></tr>
             <tr><td style="white-space:nowrap;font-family:monospace;color:var(--green)">/commands</td><td>List all available commands in chat</td></tr>
           </tbody>
