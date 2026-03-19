@@ -168,8 +168,8 @@
       transform: scale(0.95);
     }
     .preview-char {
-      width: 80px;
-      height: 100px;
+      width: 140px;
+      height: 140px;
       margin: 0 auto;
     }
     #play-btn {
@@ -1630,7 +1630,7 @@
       max-width: 340px;
     }
     .mobile .join-form input[type="text"] { width: 100%; padding: 8px 12px; font-size: 14px; }
-    .mobile .preview-char { width: 40px; height: 52px; margin: 0 auto; }
+    .mobile .preview-char { width: 100px; height: 100px; margin: 0 auto; }
     .mobile .color-row { gap: 6px; padding: 3px 8px; }
     .mobile .color-row span { font-size: 11px; }
     .mobile .custom-color-btn { width: 30px; height: 22px; }
@@ -2491,8 +2491,7 @@
       <p class="subtitle">Survive the plains. Change the plains.</p>
     </div>
     <div class="join-form">
-      <input type="text" id="username" placeholder="Enter username" maxlength="20" autofocus>
-      <canvas id="char-preview" class="preview-char" width="80" height="100"></canvas>
+      <canvas id="char-preview" class="preview-char" width="140" height="140"></canvas>
       <div class="color-picker-row">
         <div class="color-pickers">
           <div class="color-row">
@@ -2518,6 +2517,7 @@
           </svg>
         </button>
       </div>
+      <input type="text" id="username" placeholder="Enter username" maxlength="20" autofocus>
       <input type="password" id="server-password" placeholder="Server password" style="display:none">
       <button id="play-btn">PLAY</button>
       <button class="htp-btn" onclick="document.getElementById('htp-modal').classList.add('open')">How to Play</button>
@@ -2628,14 +2628,16 @@
         <table class="controls-table">
           <tr><td>WASD</td><td>Move</td></tr>
           <tr><td>R</td><td>Toggle auto-run</td></tr>
-          <tr><td>Left Click</td><td>Punch (cone attack)</td></tr>
-          <tr><td>Shift + Click</td><td>Lunge (dash forward + AOE)</td></tr>
+          <tr><td>Left Click</td><td>Punch &mdash; melee cone attack</td></tr>
+          <tr><td>Shift + Click</td><td>Lunge &mdash; dash forward with AOE slam</td></tr>
           <tr><td>Right Click</td><td>Shoot arrow</td></tr>
-          <tr><td>F</td><td>Parry (reflects melee &amp; projectiles)</td></tr>
-          <tr><td>Space</td><td>Dash (quick dodge in movement direction)</td></tr>
-          <tr><td>Q</td><td>Shield (2s duration, 12s cooldown)</td></tr>
-          <tr><td>1-4</td><td>Build (Wall / Gate / Turret / Bed, same key twice to dismiss)</td></tr>
-          <tr><td>Ctrl + Click</td><td>Party invite (player) / Edit whitelist (gate/turret)</td></tr>
+          <tr><td>F</td><td>Parry &mdash; tight window, reflects melee damage and projectiles back</td></tr>
+          <tr><td>Space</td><td>Dash &mdash; quick dodge in movement direction</td></tr>
+          <tr><td>Q</td><td>Shield &mdash; blocks all damage briefly</td></tr>
+          <tr><td>1 &ndash; 4</td><td>Select building (Wall / Gate / Turret / Bed, same key twice to dismiss)</td></tr>
+          <tr><td>5</td><td>Demolish structure (5 again or ESC to dismiss)</td></tr>
+          <tr><td>Click (building)</td><td>Place selected building on the grid</td></tr>
+          <tr><td>Ctrl + Click</td><td>Party invite (on player) / Edit whitelist (on your gate or turret)</td></tr>
           <tr><td>Enter</td><td>Open chat</td></tr>
           <tr><td>ESC</td><td>Open/close this menu</td></tr>
         </table>
