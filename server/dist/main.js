@@ -2147,7 +2147,7 @@ function tickLion(world2, lion, target, dist, delta) {
         }
       }
     }
-    const maxReinforcements = Math.min(4, sourceLionsForTarget + 2);
+    const maxReinforcements = Math.min(3, sourceLionsForTarget + 2);
     const firstSpawnDelay = reinforcementsForTarget === 0 ? 500 : 2e3;
     if (!lion.isReinforcement && elapsed > firstSpawnDelay && reinforcementsForTarget < maxReinforcements && now - lion.lastChaseSpawnTime > 2e3 && world2.enemies.size < MAX_ENEMIES) {
       const awayAngle = Math.atan2(lion.y - target.y, lion.x - target.x) + (Math.random() - 0.5) * 0.8;
