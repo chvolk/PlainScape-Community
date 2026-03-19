@@ -1724,6 +1724,8 @@ var Lion = class extends Enemy {
   isReinforcement = false;
   flankSide = 0;
   // 1 = right flank, -1 = left flank, 0 = head-on
+  wanderStartTime = 0;
+  // when chase lion started wandering (0 = not wandering)
   // Pounce attack state
   pouncing = false;
   pouncePhase = "windup";
@@ -2471,6 +2473,12 @@ function tickAI(world2, delta, doSeparation = true) {
         enemy.speed = LION_SPEED;
         enemy.chaseStartTime = 0;
         enemy.chaseLionsSpawned = 0;
+        if (enemy.isReinforcement) {
+          if (enemy.wanderStartTime === 0) enemy.wanderStartTime = Date.now();
+          if (Date.now() - enemy.wanderStartTime > 5e3) {
+            enemy.markedForRemoval = true;
+          }
+        }
       }
       if (enemy instanceof Ghost) {
         tickGhostPhase(enemy);
@@ -2478,6 +2486,9 @@ function tickAI(world2, delta, doSeparation = true) {
       continue;
     }
     enemy.aggroTurretId = null;
+    if (enemy instanceof Lion && enemy.isReinforcement) {
+      enemy.wanderStartTime = 0;
+    }
     const dist = Math.hypot(target.x - enemy.x, target.y - enemy.y);
     enemy.facing = Math.atan2(target.y - enemy.y, target.x - enemy.x);
     if (enemy instanceof ScorchedStag) {
