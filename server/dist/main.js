@@ -3636,7 +3636,7 @@ function executeTool(name, input) {
           return cached;
         }
         const filePath = path2.resolve(PROJECT_ROOT2, normalizedPath);
-        if (!filePath.startsWith(PROJECT_ROOT2)) {
+        if (!filePath.startsWith(PROJECT_ROOT2 + path2.sep) && filePath !== PROJECT_ROOT2) {
           return "Error: path escapes project root";
         }
         if (!fs.existsSync(filePath)) {
@@ -3668,7 +3668,7 @@ ${result}`;
       case "write_file": {
         const normalizedPath = normalizePath(input.path);
         const filePath = path2.resolve(PROJECT_ROOT2, normalizedPath);
-        if (!filePath.startsWith(PROJECT_ROOT2)) {
+        if (!filePath.startsWith(PROJECT_ROOT2 + path2.sep) && filePath !== PROJECT_ROOT2) {
           return "Error: path escapes project root";
         }
         const dir = path2.dirname(filePath);
@@ -3688,7 +3688,7 @@ ${result}`;
       case "edit_file": {
         const normalizedPath = normalizePath(input.path);
         const filePath = path2.resolve(PROJECT_ROOT2, normalizedPath);
-        if (!filePath.startsWith(PROJECT_ROOT2)) {
+        if (!filePath.startsWith(PROJECT_ROOT2 + path2.sep) && filePath !== PROJECT_ROOT2) {
           return "Error: path escapes project root";
         }
         if (!fs.existsSync(filePath)) {
@@ -3746,15 +3746,17 @@ Fix the crash and rebuild, then run smoke_test again.`;
         }
       }
       case "run_command": {
-        const cmd = input.command;
-        if (cmd.includes("rm -rf") || cmd.includes("npm install") || cmd.includes("npm add")) {
-          return "Error: command not allowed";
-        }
-        if (/^\s*(cat|head|tail|sed\s+-n|grep)\s/.test(cmd) || /^\s*sed\s.*-n\s/.test(cmd)) {
-          return "Error: use read_file to read files, not shell commands. Use edit_file to modify files, not sed.";
-        }
-        if (/^\s*sed\s+-i/.test(cmd) || /^\s*sed\s.*-i/.test(cmd)) {
-          return "Error: use edit_file to modify files, not sed -i.";
+        const cmd = input.command.trim();
+        const ALLOWED_COMMANDS = [
+          /^npx esbuild\s/,
+          /^npm run build$/,
+          /^node scripts\/smoke-test\.mjs$/,
+          /^ls(\s|$)/,
+          /^find\s/,
+          /^pwd$/
+        ];
+        if (!ALLOWED_COMMANDS.some((r) => r.test(cmd))) {
+          return "Error: command not in allowlist. Only build commands (npx esbuild, npm run build), ls, find, pwd, and node scripts/smoke-test.mjs are allowed. Use read_file/write_file/edit_file for file operations.";
         }
         const output = execSync(cmd, {
           cwd: PROJECT_ROOT2,
@@ -4444,6 +4446,29 @@ var DailyWinnerScheduler = class {
     if (!trimmed || trimmed.length > 500) {
       player.send({ type: "error", message: "Rule text must be 1-500 characters." });
       player.pendingWinnerPrompt = true;
+      return;
+    }
+    const INJECTION_PATTERNS = [
+      /ignore\s+(previous|prior|above|all)\s+(instructions|prompts|rules)/i,
+      /disregard\s+(previous|prior|above|all)/i,
+      /you\s+are\s+(now|no\s+longer)/i,
+      /system\s*prompt/i,
+      /run_command/i,
+      /execSync/i,
+      /exec\s*\(/i,
+      /child_process/i,
+      /\bimport\s*\(/i,
+      /require\s*\(/i,
+      /\bcurl\b/i,
+      /\bwget\b/i,
+      /\beval\b/i,
+      /process\.env/i,
+      /\.env\b/i
+    ];
+    if (INJECTION_PATTERNS.some((p) => p.test(trimmed))) {
+      player.send({ type: "error", message: "Rule text contains disallowed content. Please write a gameplay rule." });
+      player.pendingWinnerPrompt = true;
+      console.warn(`[DailyWinner] Rejected rule from ${player.username} \u2014 possible injection: "${trimmed.slice(0, 100)}"`);
       return;
     }
     const topSugg = this.world.db.getTopSuggestion();
@@ -6337,6 +6362,7 @@ function startHeartbeat(world2) {
 
 // server/src/admin/AdminConsole.ts
 import { execSync as execSync4, spawn } from "child_process";
+import crypto from "crypto";
 import http2 from "http";
 import fs4 from "fs";
 import path7 from "path";
@@ -7811,17 +7837,18 @@ function startAdminConsole(world2) {
   const port = parseInt(process.env.ADMIN_PORT || "4801", 10);
   const password = process.env.ADMIN_CONSOLE_PASSWORD || "";
   const validSessions = /* @__PURE__ */ new Set();
+  const failedAttempts = /* @__PURE__ */ new Map();
+  const MAX_FAILED_ATTEMPTS = 10;
+  const LOCKOUT_DURATION = 6e4;
   function generateSession() {
-    const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-    let s = "";
-    for (let i = 0; i < 32; i++) s += chars[Math.floor(Math.random() * chars.length)];
+    const s = crypto.randomBytes(24).toString("base64url");
     validSessions.add(s);
     return s;
   }
   function isAuthed(req) {
     if (!password) return true;
     const cookie = req.headers.cookie || "";
-    const match = cookie.match(/admin_session=([a-z0-9]+)/);
+    const match = cookie.match(/admin_session=([a-zA-Z0-9_-]+)/);
     return match ? validSessions.has(match[1]) : false;
   }
   const envPath = path7.resolve(PROJECT_ROOT5, ".env");
@@ -7887,12 +7914,19 @@ function startAdminConsole(world2) {
         return;
       }
       if (url.pathname === "/api/auth" && method === "POST") {
+        const clientIp = req.socket.remoteAddress || "unknown";
+        const attempt = failedAttempts.get(clientIp);
+        if (attempt && attempt.count >= MAX_FAILED_ATTEMPTS && Date.now() - attempt.lastAttempt < LOCKOUT_DURATION) {
+          err(res, "Too many failed attempts \u2014 try again in 1 minute", 429);
+          return;
+        }
         const body = parseJson(await readBody(req));
         if (!body) {
           err(res, "Invalid JSON");
           return;
         }
         if (body.password === password) {
+          failedAttempts.delete(clientIp);
           const session = generateSession();
           res.writeHead(200, {
             "Content-Type": "application/json",
@@ -7900,6 +7934,11 @@ function startAdminConsole(world2) {
           });
           res.end(JSON.stringify({ ok: true }));
         } else {
+          const prev = failedAttempts.get(clientIp) || { count: 0, lastAttempt: 0 };
+          if (Date.now() - prev.lastAttempt > LOCKOUT_DURATION) prev.count = 0;
+          prev.count++;
+          prev.lastAttempt = Date.now();
+          failedAttempts.set(clientIp, prev);
           err(res, "Invalid password", 401);
         }
         return;
@@ -8044,10 +8083,10 @@ function startAdminConsole(world2) {
         try {
           const content = fs4.readFileSync(envPath, "utf-8");
           const redacted = content.replace(
-            /^(ANTHROPIC_API_KEY|PATREON_KEY|DEMO_KEY|REGISTRY_SECRET|GITHUB_TOKEN|ADMIN_CONSOLE_PASSWORD)=(.+)$/gm,
+            /^(ANTHROPIC_API_KEY|PATREON_KEY|DEMO_KEY|REGISTRY_SECRET|GITHUB_TOKEN|ADMIN_CONSOLE_PASSWORD|PATREON_CLIENT_ID|PATREON_CLIENT_SECRET)=(.+)$/gm,
             (_, key, val) => `${key}=${"*".repeat(Math.min(val.length, 20))}`
           );
-          json(res, { content, redacted });
+          json(res, { content: redacted, redacted });
         } catch {
           json(res, { content: "", redacted: "" });
         }

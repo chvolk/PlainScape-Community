@@ -16,7 +16,7 @@ The rule MUST NOT:
 
 The rule CAN:
 - Add new enemies, items, or environmental effects
-- Modify existing game parameters (speeds, damages, costs, spawn rates)
+- Modify existing game parameters (speeds, damages, costs, spawn rates, actions/attacks)
 - Add fun social mechanics or challenges
 - Change the day/night cycle behavior
 - Add cosmetic effects
