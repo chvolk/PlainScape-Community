@@ -4406,20 +4406,25 @@ var DailyWinnerScheduler = class {
     }
   }
   async implementAndApplyRule(author, ruleText) {
-    this.addRuleAndBroadcast(author, ruleText);
+    const dbRule = this.world.db.addRule(ruleText, author);
     this.world.db.setWorldStateValue("champion_rule", ruleText);
     this.broadcastChampionInfo();
     this.world.broadcastAll({ type: "notification", text: `AI is implementing rule: "${ruleText}"...` });
+    this.world.broadcastAll({
+      type: "event",
+      kind: "source",
+      message: `New rule submitted by ${author}: "${ruleText}" \u2014 implementing...`
+    });
     this.world.isImplementingRule = true;
     this.world.broadcastAll({ type: "rule_status", implementing: true });
-    const addedRule = this.world.rules[this.world.rules.length - 1];
+    let finalStatus = "failed";
     try {
       const result = await implementRule(ruleText);
       this.world.isImplementingRule = false;
       this.world.broadcastAll({ type: "rule_status", implementing: false });
       if (result.success) {
-        addedRule.status = "success";
-        this.world.db.updateRuleStatus(addedRule.id, "success");
+        finalStatus = "success";
+        this.world.db.updateRuleStatus(dbRule.id, "success");
         console.log(`[DailyWinner] Rule implemented successfully, scheduling restart`);
         this.world.broadcastAll({
           type: "notification",
@@ -4427,8 +4432,7 @@ var DailyWinnerScheduler = class {
         });
         scheduleRestart();
       } else {
-        addedRule.status = "failed";
-        this.world.db.updateRuleStatus(addedRule.id, "failed");
+        this.world.db.updateRuleStatus(dbRule.id, "failed");
         console.error(`[DailyWinner] Rule implementation failed: ${result.error}`);
         this.world.broadcastAll({
           type: "notification",
@@ -4436,12 +4440,24 @@ var DailyWinnerScheduler = class {
         });
       }
     } catch (err) {
-      addedRule.status = "failed";
-      this.world.db.updateRuleStatus(addedRule.id, "failed");
+      this.world.db.updateRuleStatus(dbRule.id, "failed");
       console.error("[DailyWinner] Rule implementation error:", err);
       this.world.isImplementingRule = false;
       this.world.broadcastAll({ type: "rule_status", implementing: false });
     }
+    const rule = {
+      id: dbRule.id,
+      text: dbRule.text,
+      createdBy: dbRule.created_by,
+      createdAt: dbRule.created_at,
+      status: finalStatus
+    };
+    this.world.rules.push(rule);
+    this.world.broadcastAll({
+      type: "rules_update",
+      rules: this.world.rules,
+      isAlert: true
+    });
   }
   addRuleAndBroadcast(author, ruleText) {
     const dbRule = this.world.db.addRule(ruleText, author);

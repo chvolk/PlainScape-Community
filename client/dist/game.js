@@ -4739,7 +4739,19 @@ function updateRules(rules) {
     li.appendChild(document.createTextNode(" "));
     const author = document.createElement("span");
     author.className = "rule-author";
-    author.textContent = `\u2014 added by ${rule.createdBy}`;
+    author.textContent = `\u2014 added by ${rule.createdBy} `;
+    const badge = document.createElement("span");
+    if (rule.status === "success") {
+      badge.textContent = "\u2713";
+      badge.style.color = "#4caf50";
+    } else if (rule.status === "failed") {
+      badge.textContent = "\u2717";
+      badge.style.color = "#e74c3c";
+    } else {
+      badge.textContent = "\u23F3";
+      badge.style.color = "#f0c040";
+    }
+    author.appendChild(badge);
     li.appendChild(author);
     list.appendChild(li);
   }
@@ -5135,10 +5147,22 @@ function setupNpcPanels(conn2, input2, state2) {
           text.textContent = `"${plain}"`;
           text.style.color = "#ddd";
           entry.appendChild(text);
-          const author = document.createElement("div");
-          author.className = "sign-entry-meta";
-          author.textContent = `\u2014 ${rule.createdBy}`;
-          entry.appendChild(author);
+          const meta = document.createElement("div");
+          meta.className = "sign-entry-meta";
+          meta.textContent = `\u2014 ${rule.createdBy} `;
+          const badge = document.createElement("span");
+          if (rule.status === "success") {
+            badge.textContent = "\u2713 Implemented";
+            badge.style.cssText = "color:#4caf50;font-weight:bold;font-size:11px";
+          } else if (rule.status === "failed") {
+            badge.textContent = "\u2717 Failed";
+            badge.style.cssText = "color:#e74c3c;font-weight:bold;font-size:11px";
+          } else {
+            badge.textContent = "\u23F3 Pending";
+            badge.style.cssText = "color:#f0c040;font-weight:bold;font-size:11px";
+          }
+          meta.appendChild(badge);
+          entry.appendChild(meta);
           content.appendChild(entry);
         }
       }
