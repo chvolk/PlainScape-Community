@@ -3617,6 +3617,21 @@ function backupFile(filePath) {
 function normalizePath(p) {
   return p.replace(/^(\/app\/|app\/|\.\/)/, "");
 }
+var SENSITIVE_FILE_PATTERNS = [
+  /^\.env$/,
+  /^\.env\./,
+  /\.db$/,
+  /\.db-journal$/,
+  /\.db-wal$/,
+  /\.pem$/,
+  /\.key$/,
+  /\/\.git\//,
+  /^\.git\//
+];
+function isSensitivePath(normalizedPath) {
+  const basename = path2.basename(normalizedPath);
+  return SENSITIVE_FILE_PATTERNS.some((p) => p.test(normalizedPath) || p.test(basename));
+}
 function executeTool(name, input) {
   try {
     switch (name) {
@@ -3626,6 +3641,9 @@ function executeTool(name, input) {
           return "ERROR: READ LIMIT REACHED. You have read enough files. You MUST use write_file now to implement the changes. Stop reading and start writing code immediately.";
         }
         const normalizedPath = normalizePath(input.path);
+        if (isSensitivePath(normalizedPath)) {
+          return "Error: access denied \u2014 this file contains sensitive data";
+        }
         const startLine = input.start_line ? parseInt(input.start_line, 10) : input.start ? parseInt(input.start, 10) : 0;
         const endLine = input.end_line ? parseInt(input.end_line, 10) : input.end ? parseInt(input.end, 10) : 0;
         const hasLineRange = startLine > 0 || endLine > 0;
@@ -3667,6 +3685,9 @@ ${result}`;
       }
       case "write_file": {
         const normalizedPath = normalizePath(input.path);
+        if (isSensitivePath(normalizedPath)) {
+          return "Error: access denied \u2014 this file contains sensitive data";
+        }
         const filePath = path2.resolve(PROJECT_ROOT2, normalizedPath);
         if (!filePath.startsWith(PROJECT_ROOT2 + path2.sep) && filePath !== PROJECT_ROOT2) {
           return "Error: path escapes project root";
@@ -3674,6 +3695,9 @@ ${result}`;
         const dir = path2.dirname(filePath);
         if (!fs.existsSync(dir)) {
           fs.mkdirSync(dir, { recursive: true });
+        }
+        if (input.content && /process\.env\.(ANTHROPIC_API_KEY|PATREON_KEY|PATREON_CLIENT_SECRET|GITHUB_TOKEN|GITHUB_PAT|ADMIN_CONSOLE_PASSWORD|REGISTRY_SECRET|DEMO_KEY)/.test(input.content)) {
+          return "Error: code must not access sensitive environment variables";
         }
         backupFile(filePath);
         fs.writeFileSync(filePath, input.content);
@@ -3687,6 +3711,9 @@ ${result}`;
       }
       case "edit_file": {
         const normalizedPath = normalizePath(input.path);
+        if (isSensitivePath(normalizedPath)) {
+          return "Error: access denied \u2014 this file contains sensitive data";
+        }
         const filePath = path2.resolve(PROJECT_ROOT2, normalizedPath);
         if (!filePath.startsWith(PROJECT_ROOT2 + path2.sep) && filePath !== PROJECT_ROOT2) {
           return "Error: path escapes project root";
@@ -3699,6 +3726,9 @@ ${result}`;
         const newStr = input.new_string;
         if (!oldStr) {
           return "Error: old_string is required";
+        }
+        if (newStr && /process\.env\.(ANTHROPIC_API_KEY|PATREON_KEY|PATREON_CLIENT_SECRET|GITHUB_TOKEN|GITHUB_PAT|ADMIN_CONSOLE_PASSWORD|REGISTRY_SECRET|DEMO_KEY)/.test(newStr)) {
+          return "Error: code must not access sensitive environment variables";
         }
         const occurrences = content.split(oldStr).length - 1;
         if (occurrences === 0) {
