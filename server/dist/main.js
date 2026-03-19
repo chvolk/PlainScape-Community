@@ -746,7 +746,7 @@ var Enemy = class extends Entity {
 };
 
 // server/src/entities/ScorchedStag.ts
-var ScorchedStag = class extends Enemy {
+var ScorchedStag = class _ScorchedStag extends Enemy {
   lastFireBreathTime = 0;
   lastChargeTime = 0;
   lastMeleeTime = 0;
@@ -757,6 +757,11 @@ var ScorchedStag = class extends Enemy {
   chaseRampStart = 0;
   /** Tracks damage dealt by each player: token → { username, damage } */
   damageLog = /* @__PURE__ */ new Map();
+  /** Recent damage window for aggro targeting: playerId → damage in current 4s window */
+  recentDamage = /* @__PURE__ */ new Map();
+  recentDamageWindowStart = Date.now();
+  static AGGRO_WINDOW = 4e3;
+  // 4 seconds
   logDamage(token, username, amount) {
     const entry = this.damageLog.get(token);
     if (entry) {
@@ -764,6 +769,33 @@ var ScorchedStag = class extends Enemy {
     } else {
       this.damageLog.set(token, { username, damage: amount });
     }
+  }
+  /** Record damage for aggro targeting */
+  logRecentDamage(playerId, amount) {
+    const now = Date.now();
+    if (now - this.recentDamageWindowStart > _ScorchedStag.AGGRO_WINDOW) {
+      this.recentDamage.clear();
+      this.recentDamageWindowStart = now;
+    }
+    this.recentDamage.set(playerId, (this.recentDamage.get(playerId) || 0) + amount);
+  }
+  /** Get the player ID that dealt the most damage in the current window, or null */
+  getTopAggroPlayerId() {
+    const now = Date.now();
+    if (now - this.recentDamageWindowStart > _ScorchedStag.AGGRO_WINDOW) {
+      this.recentDamage.clear();
+      this.recentDamageWindowStart = now;
+      return null;
+    }
+    let topId = null;
+    let topDmg = 0;
+    for (const [id, dmg] of this.recentDamage) {
+      if (dmg > topDmg) {
+        topDmg = dmg;
+        topId = id;
+      }
+    }
+    return topId;
   }
   constructor(x, y) {
     super(
@@ -1254,6 +1286,7 @@ function performConeAttack(world2, attacker, facing, damage, range) {
     enemy.aggroTargetId = attacker.id;
     if (enemy instanceof ScorchedStag) {
       enemy.logDamage(attacker.token, attacker.username, totalDamage);
+      enemy.logRecentDamage(attacker.id, totalDamage);
     }
     const kbAngle = Math.atan2(enemy.y - attacker.y, enemy.x - attacker.x);
     enemy.x += Math.cos(kbAngle) * knockbackDist;
@@ -1369,6 +1402,7 @@ function performLunge(world2, player, facing) {
     enemy.aggroTargetId = player.id;
     if (enemy instanceof ScorchedStag) {
       enemy.logDamage(player.token, player.username, totalDamage);
+      enemy.logRecentDamage(player.id, totalDamage);
     }
     if (enemy.hp <= 0) {
       enemy.markedForRemoval = true;
@@ -1449,7 +1483,10 @@ function applyEnemyHit(world2, proj, enemy) {
   }
   if (enemy instanceof ScorchedStag && proj.ownerType === "player") {
     const owner = world2.players.get(proj.ownerId);
-    if (owner) enemy.logDamage(owner.token, owner.username, damage);
+    if (owner) {
+      enemy.logDamage(owner.token, owner.username, damage);
+      enemy.logRecentDamage(proj.ownerId, damage);
+    }
   }
   if (enemy.hp <= 0) {
     enemy.markedForRemoval = true;
@@ -2382,7 +2419,13 @@ function tickAI(world2, delta, doSeparation = true) {
     let target;
     if (enemy instanceof ScorchedStag) {
       enemy.aggroTargetId = null;
-      target = findNearestPlayer(world2, enemy);
+      const topAggroId = enemy.getTopAggroPlayerId();
+      const aggroTarget = topAggroId !== null ? world2.players.get(topAggroId) : null;
+      if (aggroTarget && !aggroTarget.dead && Math.hypot(aggroTarget.x, aggroTarget.y) >= SAFE_ZONE_RADIUS) {
+        target = aggroTarget;
+      } else {
+        target = findNearestPlayer(world2, enemy);
+      }
       if (target && Math.hypot(target.x, target.y) < SAFE_ZONE_RADIUS) {
         target = null;
       }

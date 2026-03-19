@@ -1047,7 +1047,11 @@ var InputHandler = class {
   }
   setDemolishMode(active) {
     this.demolishMode = active;
-    if (active) this.setBuildMode(null);
+    if (active) {
+      this.setBuildMode(null);
+      this.gamepadBuildOffsetX = 0;
+      this.gamepadBuildOffsetY = -CELL_SIZE;
+    }
     const demolishBtn = document.getElementById("demolish-btn");
     if (demolishBtn) demolishBtn.classList.toggle("active", active);
     const cancelBtn = document.getElementById("cancel-build");
@@ -1184,6 +1188,12 @@ var InputHandler = class {
             const cy = window.innerHeight / 2 + this.gamepadBuildOffsetY;
             this.onBuild(this.buildMode, cx, cy);
           }
+        } else if (this.demolishMode) {
+          if (this.onDemolish) {
+            const cx = window.innerWidth / 2 + this.gamepadBuildOffsetX;
+            const cy = window.innerHeight / 2 + this.gamepadBuildOffsetY;
+            this.onDemolish(cx, cy);
+          }
         } else {
           window.dispatchEvent(new KeyboardEvent("keydown", { key: "e", bubbles: true }));
         }
@@ -1221,7 +1231,7 @@ var InputHandler = class {
   }
   sendInput() {
     this.gamepad.poll();
-    if (this.buildMode && this.gamepad.enabled && this.gamepad.connected) {
+    if ((this.buildMode || this.demolishMode) && this.gamepad.enabled && this.gamepad.connected) {
       const speed = CELL_SIZE * 4;
       const dt = 1 / 60;
       this.gamepadBuildOffsetX += this.gamepad.aimRawX * speed * dt;
@@ -3729,6 +3739,31 @@ function drawBuildPreview(ctx, btype, worldX, worldY, playerX, playerY, playerSo
   ctx.textAlign = "center";
   ctx.fillText(btype, centerX, centerY + 4);
 }
+function drawDemolishPreview(ctx, worldX, worldY, entities, selfUsername) {
+  const cellX = Math.floor(worldX / CELL_SIZE);
+  const cellY = Math.floor(worldY / CELL_SIZE);
+  const snapX = cellX * CELL_SIZE;
+  const snapY = cellY * CELL_SIZE;
+  const centerX = snapX + CELL_SIZE / 2;
+  const centerY = snapY + CELL_SIZE / 2;
+  let hasOwned = false;
+  for (const [, e] of entities) {
+    if (e.kind !== "building" || e.ownerName !== selfUsername) continue;
+    if (Math.abs(e.x - centerX) < CELL_SIZE / 2 && Math.abs(e.y - centerY) < CELL_SIZE / 2) {
+      hasOwned = true;
+      break;
+    }
+  }
+  ctx.fillStyle = hasOwned ? "rgba(255, 60, 60, 0.4)" : "rgba(255, 60, 60, 0.15)";
+  ctx.fillRect(snapX, snapY, CELL_SIZE, CELL_SIZE);
+  ctx.strokeStyle = hasOwned ? "rgba(255, 60, 60, 0.9)" : "rgba(255, 60, 60, 0.4)";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(snapX, snapY, CELL_SIZE, CELL_SIZE);
+  ctx.fillStyle = hasOwned ? "rgba(255, 100, 100, 1)" : "rgba(255, 100, 100, 0.6)";
+  ctx.font = "bold 10px sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("Demolish", centerX, centerY + 4);
+}
 
 // client/src/rendering/atmosphere/WeatherSystem.ts
 var MAX_WIND_LINES = 40;
@@ -4051,6 +4086,15 @@ var Renderer = class {
         drawBuildPreview(ctx, this.input.buildMode, gpWorldX, gpWorldY, state2.selfPos.x, state2.selfPos.y, state2.selfSource);
       } else {
         drawBuildPreview(ctx, this.input.buildMode, mouseWorldX, mouseWorldY, state2.selfPos.x, state2.selfPos.y, state2.selfSource);
+      }
+    }
+    if (this.input.demolishMode) {
+      const isGamepad = this.input.gamepad.enabled && this.input.gamepad.connected;
+      if (isGamepad) {
+        this.drawBuildRangeOverlay(ctx, state2.selfPos.x, state2.selfPos.y, W, H, cam);
+        const gpWorldX = state2.selfPos.x + this.input.gamepadBuildOffsetX;
+        const gpWorldY = state2.selfPos.y + this.input.gamepadBuildOffsetY;
+        drawDemolishPreview(ctx, gpWorldX, gpWorldY, state2.entities, state2.selfUsername);
       }
     }
     this.drawNPCs(ctx);

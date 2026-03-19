@@ -790,7 +790,9 @@
       background: rgba(255,255,255,0.1);
       border: 1px solid rgba(255,255,255,0.2);
       color: #eee;
-      padding: 10px 32px;
+      padding: 10px 0;
+      width: 220px;
+      text-align: center;
       border-radius: 6px;
       cursor: pointer;
       font-size: 14px;
@@ -802,7 +804,9 @@
       background: rgba(255,60,60,0.15);
       border: 1px solid rgba(255,60,60,0.4);
       color: #ff4444;
-      padding: 10px 32px;
+      padding: 10px 0;
+      width: 220px;
+      text-align: center;
       border-radius: 6px;
       cursor: pointer;
       font-size: 14px;
@@ -816,7 +820,9 @@
       background: rgba(100,150,255,0.15);
       border: 1px solid rgba(100,150,255,0.4);
       color: #6496ff;
-      padding: 10px 32px;
+      padding: 10px 0;
+      width: 220px;
+      text-align: center;
       border-radius: 6px;
       cursor: pointer;
       font-size: 14px;
@@ -926,7 +932,9 @@
       background: rgba(255,255,255,0.1);
       border: 1px solid rgba(255,255,255,0.2);
       color: #eee;
-      padding: 10px 32px;
+      padding: 10px 0;
+      width: 220px;
+      text-align: center;
       border-radius: 6px;
       cursor: pointer;
       font-size: 14px;
@@ -1319,6 +1327,8 @@
       padding: 24px 32px;
       min-width: 320px;
       max-width: 420px;
+      max-height: 85vh;
+      overflow-y: auto;
       border: 2px solid rgba(255,255,255,0.15);
     }
     .sign-inner.sign-patch_notes {
@@ -2852,6 +2862,7 @@
         <tr><td>Space</td><td>Dash &mdash; quick dodge in movement direction</td></tr>
         <tr><td>Q</td><td>Shield &mdash; blocks all damage briefly</td></tr>
         <tr><td>1 &ndash; 4</td><td>Select building (Wall / Gate / Turret / Bed, same key twice to dismiss)</td></tr>
+        <tr><td>5</td><td>Demolish structure (5 again or ESC to dismiss)</td></tr>
         <tr><td>Click (building)</td><td>Place selected building on the grid</td></tr>
         <tr><td>Ctrl + Click</td><td>Party invite (on player) / Edit whitelist (on your gate or turret)</td></tr>
         <tr><td>Enter</td><td>Open chat</td></tr>
@@ -2870,27 +2881,28 @@
         <tr><td>Kill Player</td><td>+20</td></tr>
         <tr><td>Kill Scorched Stag</td><td>+400</td></tr>
         <tr><td>Destroy Building</td><td>+5</td></tr>
-        <tr><td>Dawn / Dusk Bonus</td><td>+2 per kill during transitions</td></tr>
-        <tr><td>Distance Bonus</td><td>+2 per 700 units from the safe zone edge</td></tr>
+        <tr><td>Dawn Bonus</td><td>+2 per Lion kill during Dawn</td></tr>
+        <tr><td>Dusk Bonus</td><td>+2 per Ghost kill during Dusk</td></tr>
+        <tr><td>Distance Bonus</td><td>+2 per 700 units from the safe zone edge (limit +25 bonus per kill)</td></tr>
         <tr><td>Death Consolation</td><td>+3</td></tr>
       </table>
       <p style="font-size:11px;color:#888;margin-top:6px">The further you are from the safe zone, the more Source you earn per kill. Risk vs. reward.</p>
 
       <h3>Day / Night Cycle</h3>
-      <p>The world uses <strong>real wall-clock time</strong> and cycles through four phases: <strong style="color:#f0c040">Day</strong> (lions roam), <strong style="color:#7799ee">Night</strong> (ghosts haunt), and <strong style="color:#cc8844">Dawn/Dusk</strong> transitions where both enemy types are active. Dawn and dusk are the most dangerous &mdash; but kills during transitions earn bonus Source.</p>
+      <p>The world cycles through four phases: <strong style="color:#f0c040">Day</strong> (10 min, lions roam), <strong style="color:#7799ee">Night</strong> (10 min, ghosts haunt), and <strong style="color:#cc8844">Dawn/Dusk</strong> (5 min) transitions where both enemy types are active. Dawn and dusk are the most dangerous &mdash; but kills during transitions earn bonus Source.</p>
 
       <h3>Enemies</h3>
       <div class="htp-entry">
         <div class="htp-icon" style="background:#3a2a10;">&#x1F981;</div>
         <div class="htp-entry-text">
-          <strong>Lion</strong> <span style="color:#c4873a;display:inline">(Day &amp; Dawn)</span>
+          <strong>Lion</strong> <span style="color:#c4873a;display:inline">(Day &amp; + 2 Bonus Source During Dawn)</span>
           <span>Melee charger. Lions ramp up speed the longer they chase you, and prolonged chases attract reinforcements. They pounce from range, then swipe up close. After attacking they briefly crouch &mdash; your window to counterattack. Weak to ranged attacks. They will also attack your buildings to reach turrets that shoot at them.</span>
         </div>
       </div>
       <div class="htp-entry">
         <div class="htp-icon" style="background:#1a1a30;">&#x1F47B;</div>
         <div class="htp-entry-text">
-          <strong>Ghost</strong> <span style="color:#7799ee;display:inline">(Night &amp; Dusk)</span>
+          <strong>Ghost</strong> <span style="color:#7799ee;display:inline">(Night &amp; + 2 Bonus Source During Dusk)</span>
           <span>Ranged kiter. Ghosts keep their distance and fire slow homing projectiles. They strafe to dodge and periodically burst-fire two rapid shots. While wandering, ghosts phase out and become intangible. Parried ghost projectiles home onto nearby enemies. Weak to melee &mdash; close the gap fast.</span>
         </div>
       </div>
@@ -2898,7 +2910,7 @@
         <div class="htp-icon" style="background:#3a1a0a;">&#x1F98C;</div>
         <div class="htp-entry-text">
           <strong>Scorched Stag</strong> <span style="color:#ff6633;display:inline">(World Boss)</span>
-          <span>Fire-breathing stag with 300 HP. Breathes fire, charges at players, and deals heavy melee damage. Drops 400 Source on kill. HP persists across server restarts and resets weekly. Coordinate with other players to take it down.</span>
+          <span>Fire-breathing stag with 300 HP. Breathes fire, charges at players, and deals heavy melee damage. Drops 300 Source on kill (split proportionally among the players who damaged it based on damage done). HP persists across server restarts and resets weekly. Coordinate with other players to take it down.</span>
         </div>
       </div>
 
@@ -2921,7 +2933,7 @@
         <div class="htp-icon" style="background:#2a2a2a;color:#ff4444;font-size:16px;">&#x2BC1;</div>
         <div class="htp-entry-text">
           <strong>Turret</strong> <span style="color:#f0c040;display:inline">(80 Source)</span>
-          <span>Auto-targeting cannon. Fires explosive projectiles at nearby enemies and non-whitelisted players. Shots explode on impact with AOE damage. Enemies that get shot by turrets will aggro and attack them. Ctrl+click to manage whitelist.</span>
+          <span>Auto-targeting cannon. Fires explosive projectiles at nearby enemies and non-whitelisted players. Shots explode on impact with AOE damage. Enemies that get shot by turrets will aggro and attack them. Ctrl+click to manage whitelist. Colored with your shirt and pants colors.</span>
         </div>
       </div>
       <div class="htp-entry">
@@ -2967,7 +2979,7 @@
         <div class="htp-icon" style="background:#1a2a4a;color:#4488ff;font-size:18px;">&#x1F465;</div>
         <div class="htp-entry-text">
           <strong>Team Up</strong>
-          <span>Ctrl+click another player to invite them. Party members appear <strong style="color:#4488ff">blue</strong> on the minimap and share Source: the earner keeps 40%, the rest is split evenly. Up to 10 players per party.</span>
+          <span>Ctrl+click another player to invite them. Party members appear <strong style="color:#4488ff">blue</strong> on the minimap, their beds heal you, and you share Source: the earner keeps 40%, the rest is split evenly. Up to 10 players per party.</span>
         </div>
       </div>
 
@@ -2976,7 +2988,7 @@
         <div class="htp-icon" style="background:#3a2a1a;color:#f0c040;font-size:18px;">&#x1F451;</div>
         <div class="htp-entry-text">
           <strong>Daily Champion</strong>
-          <span>Each day at dusk, the player with the most total Source earned is crowned champion. They can write their own rule (stats reset as sacrifice) or adopt the community's top suggestion from the Scribe (keep stats). Rules are implemented by AI and last until the weekly reset.</span>
+          <span>Each day at dusk, the player with the most total Source earned is crowned champion. The champion loses all their source upon rule adoption, can adopt the community's top suggestion from the Scribe which allows them to keep their stat changes. Rules are implemented by AI and last until the weekly reset.</span>
         </div>
       </div>
 
