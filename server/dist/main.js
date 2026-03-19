@@ -1722,6 +1722,8 @@ var Lion = class extends Enemy {
   chaseLionsSpawned = 0;
   lastChaseSpawnTime = 0;
   isReinforcement = false;
+  flankSide = 0;
+  // 1 = right flank, -1 = left flank, 0 = head-on
   // Pounce attack state
   pouncing = false;
   pouncePhase = "windup";
@@ -1978,6 +1980,7 @@ function findNearestPlayer(world2, enemy) {
 // server/src/systems/ai/LionAI.ts
 var LION_RAMP_DURATION = 3e3;
 var LION_MAX_SPEED_MULT = 1.18;
+var CHASE_LION_MAX_SPEED_MULT = 1.4;
 function tickLion(world2, lion, target, dist, delta) {
   const now = Date.now();
   if (lion.crouchUntil > now) {
@@ -2117,7 +2120,8 @@ function tickLion(world2, lion, target, dist, delta) {
     const elapsed = now - lion.chaseStartTime;
     const rampT = Math.min(1, elapsed / LION_RAMP_DURATION);
     const targetSpeed = target.getSpeed();
-    const maxSpeed = Math.max(PLAYER_SPEED * LION_MAX_SPEED_MULT, targetSpeed * 1.2);
+    const speedMult = lion.isReinforcement ? CHASE_LION_MAX_SPEED_MULT : LION_MAX_SPEED_MULT;
+    const maxSpeed = Math.max(PLAYER_SPEED * speedMult, targetSpeed * 1.2);
     lion.speed = LION_SPEED + (maxSpeed - LION_SPEED) * rampT;
     const sincePounce = now - lion.pounceLandTime;
     if (lion.pounceLandTime > 0 && sincePounce < 1e3) {
@@ -2125,14 +2129,23 @@ function tickLion(world2, lion, target, dist, delta) {
     }
     let reinforcementsForTarget = 0;
     let sourceLionsForTarget = 0;
+    let flankLeft = 0;
+    let flankRight = 0;
+    let flankHead = 0;
     if (!lion.isReinforcement) {
       for (const [, e] of world2.enemies) {
         if (!(e instanceof Lion) || e.markedForRemoval || e.aggroTargetId !== target.id) continue;
-        if (e.isReinforcement) reinforcementsForTarget++;
-        else sourceLionsForTarget++;
+        if (e.isReinforcement) {
+          reinforcementsForTarget++;
+          if (e.flankSide === -1) flankLeft++;
+          else if (e.flankSide === 1) flankRight++;
+          else flankHead++;
+        } else {
+          sourceLionsForTarget++;
+        }
       }
     }
-    const maxReinforcements = sourceLionsForTarget + 2;
+    const maxReinforcements = Math.min(4, sourceLionsForTarget + 2);
     const firstSpawnDelay = reinforcementsForTarget === 0 ? 500 : 2e3;
     if (!lion.isReinforcement && elapsed > firstSpawnDelay && reinforcementsForTarget < maxReinforcements && now - lion.lastChaseSpawnTime > 2e3 && world2.enemies.size < MAX_ENEMIES) {
       const awayAngle = Math.atan2(lion.y - target.y, lion.x - target.x) + (Math.random() - 0.5) * 0.8;
@@ -2142,6 +2155,13 @@ function tickLion(world2, lion, target, dist, delta) {
       if (Math.hypot(sx, sy) > SAFE_ZONE_RADIUS && !isInsideBuilding(sx, sy, world2)) {
         const reinforcement = new Lion(sx, sy);
         reinforcement.isReinforcement = true;
+        if (flankLeft <= flankRight && flankLeft <= flankHead) {
+          reinforcement.flankSide = -1;
+        } else if (flankRight <= flankLeft && flankRight <= flankHead) {
+          reinforcement.flankSide = 1;
+        } else {
+          reinforcement.flankSide = 0;
+        }
         reinforcement.aggroTargetId = target.id;
         world2.addEnemy(reinforcement);
         lion.chaseLionsSpawned++;
@@ -2150,7 +2170,16 @@ function tickLion(world2, lion, target, dist, delta) {
     }
     const prevX = lion.x;
     const prevY = lion.y;
-    moveEnemy(lion, target.x, target.y, world2.chunks, delta);
+    let moveToX = target.x;
+    let moveToY = target.y;
+    if (lion.isReinforcement && lion.flankSide !== 0 && dist > lion.attackRange + LION_POUNCE_RANGE * 0.4) {
+      const angleToTarget = Math.atan2(target.y - lion.y, target.x - lion.x);
+      const flankAngle = angleToTarget + lion.flankSide * (Math.PI / 3);
+      const flankDist = Math.min(dist * 0.6, 120);
+      moveToX = target.x + Math.cos(flankAngle + Math.PI) * flankDist;
+      moveToY = target.y + Math.sin(flankAngle + Math.PI) * flankDist;
+    }
+    moveEnemy(lion, moveToX, moveToY, world2.chunks, delta);
     const moved = Math.hypot(lion.x - prevX, lion.y - prevY);
     const expectedMove = lion.speed * delta;
     if (moved < expectedMove * 0.5) {
