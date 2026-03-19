@@ -393,10 +393,10 @@ var ChunkManager = class {
 };
 
 // server/src/world/DayNightCycle.ts
-var CYCLE_MS = 60 * 60 * 1e3;
-var DAWN_END = 10 * 60 * 1e3;
-var DAY_END = 30 * 60 * 1e3;
-var DUSK_END = 40 * 60 * 1e3;
+var CYCLE_MS = 30 * 60 * 1e3;
+var DAWN_END = 5 * 60 * 1e3;
+var DAY_END = 15 * 60 * 1e3;
+var DUSK_END = 20 * 60 * 1e3;
 var phaseOverride = null;
 var cycleOffset = 0;
 var offsetInitialized = false;
@@ -2124,15 +2124,17 @@ function tickLion(world2, lion, target, dist, delta) {
       lion.speed = maxSpeed * 1.15;
     }
     let reinforcementsForTarget = 0;
+    let sourceLionsForTarget = 0;
     if (!lion.isReinforcement) {
       for (const [, e] of world2.enemies) {
-        if (e instanceof Lion && e.isReinforcement && e.aggroTargetId === target.id && !e.markedForRemoval) {
-          reinforcementsForTarget++;
-        }
+        if (!(e instanceof Lion) || e.markedForRemoval || e.aggroTargetId !== target.id) continue;
+        if (e.isReinforcement) reinforcementsForTarget++;
+        else sourceLionsForTarget++;
       }
     }
+    const maxReinforcements = sourceLionsForTarget + 2;
     const firstSpawnDelay = reinforcementsForTarget === 0 ? 500 : 2e3;
-    if (!lion.isReinforcement && elapsed > firstSpawnDelay && reinforcementsForTarget < 2 && now - lion.lastChaseSpawnTime > 2e3 && world2.enemies.size < MAX_ENEMIES) {
+    if (!lion.isReinforcement && elapsed > firstSpawnDelay && reinforcementsForTarget < maxReinforcements && now - lion.lastChaseSpawnTime > 2e3 && world2.enemies.size < MAX_ENEMIES) {
       const awayAngle = Math.atan2(lion.y - target.y, lion.x - target.x) + (Math.random() - 0.5) * 0.8;
       const spawnDist = 150 + Math.random() * 100;
       const sx = lion.x + Math.cos(awayAngle) * spawnDist;
