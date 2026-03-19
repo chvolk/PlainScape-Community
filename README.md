@@ -20,6 +20,8 @@
 
 ![Server Browser](screenshots/server-browser.png)
 
+![Character Select](screenshots/character-select.png)
+
 ---
 
 ## Hosting a Server
@@ -47,6 +49,10 @@ On first startup, the server installs runtime dependencies and creates a `plains
 ### Desktop App
 
 Download `PlainScape 1.2.0.exe` (Windows) from [Releases](https://github.com/chvolk/PlainScape-Community/releases). It's a portable app — no installation needed. Configure your server, click Start, and play.
+
+![Electron App](screenshots/electron-landing.png)
+
+![Electron Host](screenshots/electron-host.png)
 
 ---
 
@@ -108,6 +114,8 @@ Optional — the game works great without it.
 
 Web-based admin panel at `http://127.0.0.1:4801` (localhost only).
 
+![Admin Dashboard](screenshots/admin-dashboard.png)
+
 - **Dashboard** — Player count, uptime, status, automatic update checker
 - **Configuration** — Edit all settings via GUI (no need to edit `.env`)
 - **Claude Rules** — Markdown editor for AI guardrails
@@ -115,6 +123,8 @@ Web-based admin panel at `http://127.0.0.1:4801` (localhost only).
 - **Bans** — View and remove bans
 - **Modding** — Toggle modded flag, promote live → stable, rollback
 - **Commands** — Quick reference for all admin chat commands
+
+![Admin Config](screenshots/admin-config.png)
 
 ---
 

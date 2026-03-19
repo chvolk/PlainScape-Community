@@ -6587,7 +6587,7 @@ textarea { min-height: 200px; line-height: 1.6; }
 .rules-split { display: flex; gap: 16px; flex: 1; min-height: 0; }
 .rules-editor-col { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .rules-editor-col textarea { flex: 1; min-height: 0; resize: none; font-size: 14px; line-height: 1.7; padding: 16px 20px; }
-.rules-active-col { width: 340px; flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; }
+.rules-active-col { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .active-rules-wrap { flex: 1; overflow-y: auto; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 0; }
 .active-rules-wrap .empty-state { padding: 20px; }
 .rule-card { padding: 12px 14px; border-bottom: 1px solid var(--border); }
@@ -6601,7 +6601,7 @@ textarea { min-height: 200px; line-height: 1.6; }
 .rule-status-pending { color: var(--amber); }
 @media (max-width: 900px) {
   .rules-split { flex-direction: column; }
-  .rules-active-col { width: 100%; max-height: 250px; }
+  .rules-active-col { max-height: 250px; }
   .rules-editor-col textarea { min-height: 200px; }
 }
 .editor-bar {
