@@ -4904,7 +4904,8 @@ var MIME = {
   ".css": "text/css",
   ".map": "application/json",
   ".png": "image/png",
-  ".ico": "image/x-icon"
+  ".ico": "image/x-icon",
+  ".mp3": "audio/mpeg"
 };
 var registry = new ServerRegistry();
 function startServer(world2) {
@@ -5218,13 +5219,19 @@ function startServer(world2) {
           if (clientIp) world2.db.setLastIp(token, clientIp);
           const serverName = process.env.SERVER_NAME || (IS_MAIN_SERVER ? "PlainScape" : "PlainScape Server");
           const serverDesc = process.env.SERVER_DESCRIPTION || (IS_MAIN_SERVER ? "Survive the plains." : "");
+          const musicTracks = {};
+          if (process.env.MUSIC_DAWN) musicTracks.dawn = process.env.MUSIC_DAWN;
+          if (process.env.MUSIC_DAY) musicTracks.day = process.env.MUSIC_DAY;
+          if (process.env.MUSIC_DUSK) musicTracks.dusk = process.env.MUSIC_DUSK;
+          if (process.env.MUSIC_NIGHT) musicTracks.night = process.env.MUSIC_NIGHT;
           const welcome = {
             type: "welcome",
             yourId: player.id,
             serverTime: Date.now(),
             dayPhase: getDayPhase(),
             serverName,
-            serverDescription: serverDesc
+            serverDescription: serverDesc,
+            ...Object.keys(musicTracks).length > 0 ? { musicTracks } : {}
           };
           ws.send(JSON.stringify(welcome));
           const leaderboard = computeLeaderboard(world2);
@@ -8077,7 +8084,11 @@ function startAdminConsole(world2) {
           { key: "SERVER_HOST", label: "Public IP", value: envMap["SERVER_HOST"] || "", placeholder: "Auto-detected", category: "Registry", type: "text", hint: "Your public IP for the server browser. Auto-detected if empty." },
           { key: "ADMIN_PORT", label: "Admin Console Port", value: envMap["ADMIN_PORT"] || "4801", placeholder: "4801", category: "Admin", type: "number" },
           { key: "GITHUB_TOKEN", label: "GitHub Token", value: envMap["GITHUB_TOKEN"] ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" : "", placeholder: "ghp_...", category: "Git", type: "secret", hint: "GitHub PAT for pushing rule code changes" },
-          { key: "GITHUB_REPO", label: "GitHub Repo", value: envMap["GITHUB_REPO"] || "", placeholder: "owner/repo", category: "Git", type: "text", hint: "Repo for rule code pushes. Use your own fork to keep changes separate. Branches: community/{server-code}/live and /stable." }
+          { key: "GITHUB_REPO", label: "GitHub Repo", value: envMap["GITHUB_REPO"] || "", placeholder: "owner/repo", category: "Git", type: "text", hint: "Repo for rule code pushes. Use your own fork to keep changes separate. Branches: community/{server-code}/live and /stable." },
+          { key: "MUSIC_DAWN", label: "Dawn Music", value: envMap["MUSIC_DAWN"] || "", placeholder: "/music/dawn.mp3", category: "Music", type: "text", hint: "File path to the dawn phase music (mp3). Relative to client/ directory." },
+          { key: "MUSIC_DAY", label: "Day Music", value: envMap["MUSIC_DAY"] || "", placeholder: "/music/day.mp3", category: "Music", type: "text", hint: "File path to the day phase music (mp3)." },
+          { key: "MUSIC_DUSK", label: "Dusk Music", value: envMap["MUSIC_DUSK"] || "", placeholder: "/music/dusk.mp3", category: "Music", type: "text", hint: "File path to the dusk phase music (mp3)." },
+          { key: "MUSIC_NIGHT", label: "Night Music", value: envMap["MUSIC_NIGHT"] || "", placeholder: "/music/night.mp3", category: "Music", type: "text", hint: "File path to the night phase music (mp3)." }
         ];
         json(res, { config });
         return;

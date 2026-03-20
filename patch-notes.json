@@ -1,11 +1,13 @@
 [
   {
-    "version": "1.2.1",
+    "version": "1.3.0",
     "date": "2026-03-19",
     "changes": [
-      "Sound effects added: sword swings, bow shots, lunges, dashes, shields, parries, and more",
-      "Action sounds are now server-confirmed — denied actions only play the denied sound",
-      "New metallic sword swing sound effect"
+      "New Game Settings menu in ESC — master audio, SFX, and music toggles with volume slider",
+      "Fullscreen toggle moved into Game Settings",
+      "Sound effects: sword swings, bow shots, lunges, dashes, shields, parries",
+      "Action sounds only play on server-confirmed hits — no more phantom sounds on denied actions",
+      "Admin console: configure custom music tracks per day phase"
     ]
   },
   {

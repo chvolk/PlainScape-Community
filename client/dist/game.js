@@ -732,7 +732,13 @@ var GamepadMenuNav = class {
         const el = this.items[this.focusIndex];
         if (!el) break;
         if (el.tagName === "INPUT") {
-          el.focus();
+          const inp = el;
+          if (inp.type === "checkbox") {
+            inp.checked = !inp.checked;
+            inp.dispatchEvent(new Event("change", { bubbles: true }));
+          } else {
+            inp.focus();
+          }
         } else {
           el.click();
         }
@@ -751,6 +757,17 @@ var GamepadMenuNav = class {
   /** Handle D-pad navigation. Returns true if consumed. */
   handleDpad(direction) {
     if (!this.container || this.items.length === 0) return false;
+    if (direction === "left" || direction === "right") {
+      const el = this.items[this.focusIndex];
+      if (el && el.tagName === "INPUT" && el.type === "range") {
+        const inp = el;
+        const step = Number(inp.step) || 5;
+        const delta = direction === "right" ? step : -step;
+        inp.value = String(Math.max(Number(inp.min), Math.min(Number(inp.max), Number(inp.value) + delta)));
+        inp.dispatchEvent(new Event("input", { bubbles: true }));
+        return true;
+      }
+    }
     this.move(direction === "up" || direction === "left" ? -1 : 1);
     return true;
   }
@@ -2470,6 +2487,10 @@ function getCtx() {
 function out() {
   getCtx();
   return masterGain;
+}
+function setVolume(v) {
+  volume = Math.max(0, Math.min(1, v));
+  if (masterGain) masterGain.gain.value = volume;
 }
 function setMuted(m) {
   muted = m;
@@ -4928,12 +4949,13 @@ var Renderer = class {
 
 // client/src/audio/MusicSystem.ts
 var FADE_DURATION = 3e3;
-var TRACKS = {
+var DEFAULT_TRACKS = {
   dawn: "/music/dawn.mp3",
   day: "/music/day.mp3",
   dusk: "/music/dusk.mp3",
   night: "/music/night.mp3"
 };
+var TRACKS = { ...DEFAULT_TRACKS };
 var audioElements = {};
 var currentPhase = null;
 var musicEnabled = true;
@@ -4998,10 +5020,40 @@ function setMusicEnabled(enabled) {
   musicEnabled = enabled;
   if (!enabled) {
     for (const [phase, audio] of Object.entries(audioElements)) {
-      if (audio.volume > 0) fadeOut(audio, phase);
+      const existing = fadeIntervals.get(phase);
+      if (existing) {
+        clearInterval(existing);
+        fadeIntervals.delete(phase);
+      }
+      audio.volume = 0;
+      audio.pause();
     }
     currentPhase = null;
   } else if (currentPhase) {
+    const phase = currentPhase;
+    currentPhase = null;
+    updateMusic(phase);
+  }
+}
+function setMusicVolume(v) {
+  musicVolume = Math.max(0, Math.min(1, v));
+  for (const audio of Object.values(audioElements)) {
+    if (audio.volume > 0) audio.volume = musicVolume;
+  }
+}
+function setMusicTracks(tracks) {
+  let changed = false;
+  for (const phase of ["dawn", "day", "dusk", "night"]) {
+    if (tracks[phase] && tracks[phase] !== TRACKS[phase]) {
+      TRACKS[phase] = tracks[phase];
+      if (audioElements[phase]) {
+        audioElements[phase].pause();
+        delete audioElements[phase];
+      }
+      changed = true;
+    }
+  }
+  if (changed && currentPhase && musicEnabled) {
     const phase = currentPhase;
     currentPhase = null;
     updateMusic(phase);
@@ -6930,6 +6982,7 @@ function handleMessage(msg) {
       state.myId = msg.yourId;
       if (msg.serverName) state.serverName = msg.serverName;
       if (msg.serverDescription) state.serverDescription = msg.serverDescription;
+      if (msg.musicTracks) setMusicTracks(msg.musicTracks);
       const menuTitle = document.querySelector("#esc-menu .menu-panel h2");
       if (menuTitle) menuTitle.textContent = state.serverName;
       hideJoinScreen();
@@ -7222,20 +7275,86 @@ function startGameLoop() {
   }
   setupControllerConfig(input);
   {
-    const audioToggle = document.getElementById("audio-toggle");
-    if (audioToggle) {
-      const savedAudio = localStorage.getItem("plainscape_audio");
-      const audioEnabled = savedAudio !== "off";
-      audioToggle.checked = audioEnabled;
-      setMuted(!audioEnabled);
-      setMusicEnabled(audioEnabled);
-      audioToggle.addEventListener("change", () => {
-        const enabled = audioToggle.checked;
-        setMuted(!enabled);
-        setMusicEnabled(enabled);
-        localStorage.setItem("plainscape_audio", enabled ? "on" : "off");
-      });
+    let applyAudioSettings2 = function() {
+      const master = masterToggle.checked;
+      const vol = parseInt(masterSlider.value, 10) / 100;
+      const sfx = sfxToggle.checked;
+      const music = musicToggle.checked;
+      setMuted(!master || !sfx);
+      setVolume(vol);
+      setMusicEnabled(master && music);
+      setMusicVolume(vol);
+    }, closeSettings2 = function() {
+      settingsModal.classList.remove("open");
+      input.modalOpen = false;
+      input.menuNav.deactivate();
+      if (input.menuOpen && input.gamepad.enabled && input.gamepad.connected) {
+        const escMenu = document.getElementById("esc-menu");
+        if (escMenu) {
+          const panel = escMenu.querySelector(".menu-panel") || escMenu;
+          input.menuNav.activate(panel, () => input.toggleMenu());
+        }
+      }
+    };
+    var applyAudioSettings = applyAudioSettings2, closeSettings = closeSettings2;
+    const settingsModal = document.getElementById("settings-modal");
+    const openBtn = document.getElementById("open-settings");
+    const closeBtn = document.getElementById("settings-close");
+    const masterToggle = document.getElementById("setting-master-audio");
+    const masterSlider = document.getElementById("setting-master-volume");
+    const sfxToggle = document.getElementById("setting-sfx");
+    const musicToggle = document.getElementById("setting-music");
+    const fsToggle = document.getElementById("setting-fullscreen");
+    const savedMaster = localStorage.getItem("ps_master_audio") !== "off";
+    const savedVol = parseInt(localStorage.getItem("ps_master_volume") || "30", 10);
+    const savedSfx = localStorage.getItem("ps_sfx") !== "off";
+    const savedMusic = localStorage.getItem("ps_music") !== "off";
+    masterToggle.checked = savedMaster;
+    masterSlider.value = String(savedVol);
+    sfxToggle.checked = savedSfx;
+    musicToggle.checked = savedMusic;
+    applyAudioSettings2();
+    masterToggle.addEventListener("change", () => {
+      localStorage.setItem("ps_master_audio", masterToggle.checked ? "on" : "off");
+      applyAudioSettings2();
+    });
+    masterSlider.addEventListener("input", () => {
+      localStorage.setItem("ps_master_volume", masterSlider.value);
+      applyAudioSettings2();
+    });
+    sfxToggle.addEventListener("change", () => {
+      localStorage.setItem("ps_sfx", sfxToggle.checked ? "on" : "off");
+      applyAudioSettings2();
+    });
+    musicToggle.addEventListener("change", () => {
+      localStorage.setItem("ps_music", musicToggle.checked ? "on" : "off");
+      applyAudioSettings2();
+    });
+    fsToggle.addEventListener("change", () => {
+      if (fsToggle.checked) {
+        document.documentElement.requestFullscreen().catch(() => {
+        });
+      } else {
+        document.exitFullscreen().catch(() => {
+        });
+      }
+    });
+    document.addEventListener("fullscreenchange", () => {
+      fsToggle.checked = !!document.fullscreenElement;
+    });
+    if (!document.documentElement.requestFullscreen) {
+      const fsSetting = document.getElementById("fullscreen-setting");
+      if (fsSetting) fsSetting.style.display = "none";
     }
+    openBtn.addEventListener("click", () => {
+      settingsModal.classList.add("open");
+      input.modalOpen = true;
+      if (input.gamepad.enabled && input.gamepad.connected) {
+        const inner = settingsModal.querySelector(".settings-inner") || settingsModal;
+        input.menuNav.activate(inner, closeSettings2);
+      }
+    });
+    closeBtn.addEventListener("click", closeSettings2);
   }
   {
     let closeHtp2 = function() {

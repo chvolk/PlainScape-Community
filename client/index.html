@@ -828,6 +828,97 @@
       font-size: 14px;
     }
     .controller-btn:hover { background: rgba(100,150,255,0.3); }
+    .settings-btn {
+      display: block;
+      margin: 8px auto 0;
+      background: rgba(200,180,100,0.15);
+      border: 1px solid rgba(200,180,100,0.4);
+      color: #c8b464;
+      padding: 10px 0;
+      width: 220px;
+      text-align: center;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .settings-btn:hover { background: rgba(200,180,100,0.3); }
+    #settings-modal {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.8);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+    }
+    #settings-modal.open { display: flex; }
+    .settings-inner {
+      background: rgba(30,30,50,0.97);
+      border: 1px solid rgba(200,180,100,0.3);
+      border-radius: 12px;
+      padding: 24px 32px;
+      min-width: 320px;
+      max-width: 400px;
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+    .settings-inner h2 {
+      color: #c8b464;
+      font-size: 18px;
+      text-align: center;
+      margin-bottom: 16px;
+    }
+    .settings-inner h3 {
+      color: #f0c040;
+      font-size: 14px;
+      margin-top: 16px;
+      margin-bottom: 8px;
+    }
+    .settings-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .settings-row label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: #aaa;
+      cursor: pointer;
+    }
+    .settings-row label input { cursor: pointer; }
+    .settings-slider-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .settings-slider-row span {
+      font-size: 13px;
+      color: #aaa;
+      min-width: 100px;
+    }
+    .settings-slider-row input[type="range"] {
+      flex: 1;
+      accent-color: #c8b464;
+      cursor: pointer;
+    }
+    .settings-close {
+      display: block;
+      margin: 16px auto 0;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #eee;
+      padding: 8px 24px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .settings-close:hover { background: rgba(255,255,255,0.2); }
     #controller-modal {
       display: none;
       position: fixed;
@@ -2398,37 +2489,9 @@
         document.removeEventListener('click', goFS);
       }, { once: true });
     }
-    // Fullscreen toggle button
-    document.addEventListener('DOMContentLoaded', function() {
-      var fsBtn = document.getElementById('fullscreen-btn');
-      if (fsBtn) {
-        fsBtn.addEventListener('click', function() {
-          if (document.fullscreenElement) {
-            document.exitFullscreen().catch(function(){});
-          } else {
-            document.documentElement.requestFullscreen().catch(function(){});
-          }
-        });
-        // Hide button if fullscreen API not available
-        if (!document.documentElement.requestFullscreen) fsBtn.style.display = 'none';
-        // Hide during gameplay (canvas handles its own fullscreen)
-        document.addEventListener('fullscreenchange', function() {
-          fsBtn.style.opacity = document.fullscreenElement ? '0.3' : '1';
-        });
-      }
-    });
   </script>
 </head>
 <body>
-  <!-- Fullscreen toggle -->
-  <button class="fullscreen-btn" id="fullscreen-btn" title="Toggle fullscreen">
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <polyline points="15 3 21 3 21 9"></polyline>
-      <polyline points="9 21 3 21 3 15"></polyline>
-      <line x1="21" y1="3" x2="14" y2="10"></line>
-      <line x1="3" y1="21" x2="10" y2="14"></line>
-    </svg>
-  </button>
 
   <!-- Server Browser (main server only, injected via IS_MAIN_SERVER) -->
   <div id="server-browser">
@@ -2655,18 +2718,8 @@
 
         <hr class="menu-divider">
 
-        <div style="display:flex;justify-content:center;gap:24px;">
-          <label class="censor-toggle">
-            <input type="checkbox" id="censor-toggle" checked>
-            Chat profanity filter
-          </label>
-          <label class="censor-toggle">
-            <input type="checkbox" id="audio-toggle" checked>
-            Audio
-          </label>
-        </div>
-
         <button class="htp-btn" onclick="document.getElementById('htp-modal').classList.add('open')">How to Play</button>
+        <button class="settings-btn" id="open-settings">Game Settings</button>
         <button class="controller-btn" id="open-controller-config">Configure Controller</button>
         <button id="close-menu">Resume Game</button>
         <button id="logout-btn" class="logout-btn">Logout</button>
@@ -2689,6 +2742,40 @@
         <div id="controller-bindings"></div>
         <button class="controller-reset" id="controller-reset">Reset to Defaults</button>
         <button class="controller-close" id="controller-close">Done</button>
+      </div>
+    </div>
+
+    <!-- Game Settings Modal -->
+    <div id="settings-modal">
+      <div class="settings-inner">
+        <h2>Game Settings</h2>
+
+        <h3>Audio</h3>
+        <div class="settings-row">
+          <label><input type="checkbox" id="setting-master-audio" checked> Master Audio</label>
+        </div>
+        <div class="settings-slider-row">
+          <span>Volume</span>
+          <input type="range" id="setting-master-volume" min="0" max="100" value="30">
+        </div>
+        <div class="settings-row">
+          <label><input type="checkbox" id="setting-sfx" checked> Sound Effects</label>
+        </div>
+        <div class="settings-row">
+          <label><input type="checkbox" id="setting-music" checked> Music</label>
+        </div>
+
+        <h3>Chat</h3>
+        <div class="settings-row">
+          <label><input type="checkbox" id="censor-toggle" checked> Profanity Filter</label>
+        </div>
+
+        <h3>Display</h3>
+        <div class="settings-row">
+          <label id="fullscreen-setting" style="cursor:pointer"><input type="checkbox" id="setting-fullscreen"> Fullscreen</label>
+        </div>
+
+        <button class="settings-close" id="settings-close">Done</button>
       </div>
     </div>
 
