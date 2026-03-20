@@ -1787,6 +1787,8 @@ var Ghost = class extends Enemy {
   burstStartTime = 0;
   burstShotsFired = 0;
   lastBurstTime = 0;
+  // Regular shot timestamp for anim
+  lastShotTime = 0;
   // Phase-out (intangible while wandering)
   phased = false;
   phaseStartTime = 0;
@@ -1816,6 +1818,8 @@ var Ghost = class extends Enemy {
       snap.anim = "windup";
     } else if (this.burstPhase === "firing") {
       snap.anim = "shoot";
+    } else if (Date.now() - this.lastShotTime < 300) {
+      snap.anim = "crouch";
     }
     if (this.phased) {
       snap.anim = "shield";
@@ -2326,6 +2330,7 @@ function tickGhost(world2, ghost, target, dist, delta) {
   if (now >= ghost.lastAttackTime + ghost.attackCooldown && dist <= ghost.attackRange) {
     fireGhostProjectile(world2, ghost, target);
     ghost.lastAttackTime = now;
+    ghost.lastShotTime = now;
   }
 }
 function fireGhostProjectile(world2, ghost, target) {

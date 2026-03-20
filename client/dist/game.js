@@ -2492,6 +2492,9 @@ function setVolume(v) {
   volume = Math.max(0, Math.min(1, v));
   if (masterGain) masterGain.gain.value = volume;
 }
+function getVolume() {
+  return volume;
+}
 function setMuted(m) {
   muted = m;
   if (masterGain) masterGain.gain.value = m ? 0 : volume;
@@ -2515,33 +2518,38 @@ function playPunch() {
   const o = out();
   if (!c || !o) return;
   const t = c.currentTime;
+  const osc = c.createOscillator();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(160, t);
+  osc.frequency.exponentialRampToValueAtTime(40, t + 0.12);
+  const g1 = c.createGain();
+  g1.gain.setValueAtTime(0.45, t);
+  g1.gain.exponentialRampToValueAtTime(1e-3, t + 0.25);
+  osc.connect(g1).connect(o);
+  osc.start(t);
+  osc.stop(t + 0.26);
+  const click = c.createOscillator();
+  click.type = "square";
+  click.frequency.setValueAtTime(800, t);
+  click.frequency.exponentialRampToValueAtTime(200, t + 0.015);
+  const g2 = c.createGain();
+  g2.gain.setValueAtTime(0.2, t);
+  g2.gain.exponentialRampToValueAtTime(1e-3, t + 0.03);
+  click.connect(g2).connect(o);
+  click.start(t);
+  click.stop(t + 0.04);
   const noise = c.createBufferSource();
   noise.buffer = getNoise();
-  const hp = c.createBiquadFilter();
-  hp.type = "highpass";
-  hp.frequency.setValueAtTime(4e3, t);
-  hp.frequency.exponentialRampToValueAtTime(6e3, t + 0.04);
-  hp.frequency.exponentialRampToValueAtTime(2e3, t + 0.12);
-  hp.Q.value = 0.8;
+  const lp = c.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.setValueAtTime(300, t);
+  lp.frequency.exponentialRampToValueAtTime(80, t + 0.06);
   const gn = c.createGain();
-  gn.gain.setValueAtTime(0.3, t);
-  gn.gain.exponentialRampToValueAtTime(1e-3, t + 0.14);
-  noise.connect(hp).connect(gn).connect(o);
+  gn.gain.setValueAtTime(0.15, t);
+  gn.gain.exponentialRampToValueAtTime(1e-3, t + 0.08);
+  noise.connect(lp).connect(gn).connect(o);
   noise.start(t);
-  noise.stop(t + 0.15);
-  for (const [freq, vol, delay] of [[2637, 0.08, 0], [4185, 0.06, 5e-3], [5588, 0.04, 0.01]]) {
-    const osc = c.createOscillator();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(freq, t + delay);
-    osc.frequency.exponentialRampToValueAtTime(freq * 0.85, t + delay + 0.1);
-    const g = c.createGain();
-    g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(vol, t + delay + 5e-3);
-    g.gain.exponentialRampToValueAtTime(1e-3, t + delay + 0.12);
-    osc.connect(g).connect(o);
-    osc.start(t);
-    osc.stop(t + delay + 0.13);
-  }
+  noise.stop(t + 0.1);
 }
 function playArrowShoot() {
   const c = getCtx();
@@ -2613,22 +2621,28 @@ function playParry() {
   const o = out();
   if (!c || !o) return;
   const t = c.currentTime;
-  const osc1 = c.createOscillator();
-  osc1.type = "square";
-  osc1.frequency.setValueAtTime(1200, t);
-  const osc2 = c.createOscillator();
-  osc2.type = "square";
-  osc2.frequency.setValueAtTime(1500, t);
-  const gain = c.createGain();
-  gain.gain.setValueAtTime(0.12, t);
-  gain.gain.exponentialRampToValueAtTime(1e-3, t + 0.15);
-  osc1.connect(gain);
-  osc2.connect(gain);
-  gain.connect(o);
-  osc1.start(t);
-  osc2.start(t);
-  osc1.stop(t + 0.15);
-  osc2.stop(t + 0.15);
+  const noise = c.createBufferSource();
+  noise.buffer = getNoise();
+  const hp = c.createBiquadFilter();
+  hp.type = "highpass";
+  hp.frequency.value = 7e3;
+  const gn = c.createGain();
+  gn.gain.setValueAtTime(0.18, t);
+  gn.gain.exponentialRampToValueAtTime(1e-3, t + 0.12);
+  noise.connect(hp).connect(gn).connect(o);
+  noise.start(t);
+  noise.stop(t + 0.13);
+  for (const freq of [587, 845, 1470]) {
+    const osc = c.createOscillator();
+    osc.type = "square";
+    osc.frequency.value = freq;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.04, t);
+    g.gain.exponentialRampToValueAtTime(1e-3, t + 0.1);
+    osc.connect(g).connect(o);
+    osc.start(t);
+    osc.stop(t + 0.11);
+  }
 }
 function playDash() {
   const c = getCtx();
@@ -2758,6 +2772,29 @@ function playGhostWindup() {
   lfo.start(t);
   osc.stop(t + 0.5);
   lfo.stop(t + 0.5);
+}
+function playGhostShot() {
+  const c = getCtx();
+  const o = out();
+  if (!c || !o) return;
+  const t = c.currentTime;
+  const osc = c.createOscillator();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(350, t);
+  osc.frequency.exponentialRampToValueAtTime(200, t + 0.15);
+  const lfo = c.createOscillator();
+  lfo.frequency.value = 10;
+  const lfoGain = c.createGain();
+  lfoGain.gain.value = 30;
+  lfo.connect(lfoGain).connect(osc.frequency);
+  const gain = c.createGain();
+  gain.gain.setValueAtTime(0.06, t);
+  gain.gain.exponentialRampToValueAtTime(1e-3, t + 0.18);
+  osc.connect(gain).connect(o);
+  osc.start(t);
+  lfo.start(t);
+  osc.stop(t + 0.2);
+  lfo.stop(t + 0.2);
 }
 function playGhostProjectile() {
   const c = getCtx();
@@ -2973,6 +3010,24 @@ function playDenied() {
 var animTimers = /* @__PURE__ */ new Map();
 var lastAnim = /* @__PURE__ */ new Map();
 var lastEnemyAnim = /* @__PURE__ */ new Map();
+var lastPlayerAnim = /* @__PURE__ */ new Map();
+var SOUND_MAX_DIST = 600;
+var playerAnimSound = {
+  punch: playPunch,
+  lunge: playLunge,
+  shoot: playArrowShoot,
+  shield: playShield,
+  parry: playParry,
+  dash: playDash
+};
+function playAtDistance(fn, dist) {
+  if (dist >= SOUND_MAX_DIST) return;
+  const savedVol = getVolume();
+  const atten = 1 - dist / SOUND_MAX_DIST;
+  setVolume(savedVol * atten * atten);
+  fn();
+  setVolume(savedVol);
+}
 var lastDashAnim = /* @__PURE__ */ new Map();
 var dashTrails = [];
 var DASH_TRAIL_DURATION = 300;
@@ -3027,6 +3082,19 @@ function drawEntities(ctx2, state2, camX, camY, screenW, screenH) {
     if (entity.kind === "player") lastDashAnim.set(id, entity.anim ?? "");
     if (entity.kind === "player") {
       drawPlayer(ctx2, pos.x, pos.y, entity, state2.partyMembers);
+      if (id !== state2.myId) {
+        const anim = entity.anim ?? "idle";
+        const prev = lastPlayerAnim.get(id) ?? "idle";
+        if (anim !== prev) {
+          const soundFn = playerAnimSound[anim];
+          if (soundFn) {
+            const dx = pos.x - state2.selfPos.x;
+            const dy = pos.y - state2.selfPos.y;
+            playAtDistance(soundFn, Math.hypot(dx, dy));
+          }
+          lastPlayerAnim.set(id, anim);
+        }
+      }
     } else if (entity.kind === "lion") {
       const spawnStart = spawnTimers.get(id);
       if (spawnStart) {
@@ -3041,8 +3109,9 @@ function drawEntities(ctx2, state2, camX, camY, screenW, screenH) {
       drawLion(ctx2, pos.x, pos.y, entity);
       const lionAnim = entity.anim ?? "idle";
       const prevLionAnim = lastEnemyAnim.get(id) ?? "idle";
-      if (lionAnim === "pounce" && prevLionAnim !== "pounce") playLionPounce();
-      else if (lionAnim === "punch" && prevLionAnim !== "punch") playLionScratch();
+      const lionDist = Math.hypot(pos.x - state2.selfPos.x, pos.y - state2.selfPos.y);
+      if (lionAnim === "pounce" && prevLionAnim !== "pounce") playAtDistance(playLionPounce, lionDist);
+      else if (lionAnim === "punch" && prevLionAnim !== "punch") playAtDistance(playLionScratch, lionDist);
       lastEnemyAnim.set(id, lionAnim);
     } else if (entity.kind === "ghost") {
       const spawnStart = spawnTimers.get(id);
@@ -3058,16 +3127,19 @@ function drawEntities(ctx2, state2, camX, camY, screenW, screenH) {
       drawGhost(ctx2, pos.x, pos.y, entity);
       const ghostAnim = entity.anim ?? "idle";
       const prevGhostAnim = lastEnemyAnim.get(id) ?? "idle";
-      if (ghostAnim === "windup" && prevGhostAnim !== "windup") playGhostWindup();
-      else if (ghostAnim === "shoot" && prevGhostAnim !== "shoot") playGhostProjectile();
+      const ghostDist = Math.hypot(pos.x - state2.selfPos.x, pos.y - state2.selfPos.y);
+      if (ghostAnim === "windup" && prevGhostAnim !== "windup") playAtDistance(playGhostWindup, ghostDist);
+      else if (ghostAnim === "shoot" && prevGhostAnim !== "shoot") playAtDistance(playGhostProjectile, ghostDist);
+      else if (ghostAnim === "crouch" && prevGhostAnim !== "crouch") playAtDistance(playGhostShot, ghostDist);
       lastEnemyAnim.set(id, ghostAnim);
     } else if (entity.kind === "stag") {
       drawStag(ctx2, pos.x, pos.y, entity);
       const stagAnim = entity.anim ?? "idle";
       const prevStagAnim = lastEnemyAnim.get(id) ?? "idle";
-      if (stagAnim === "dash" && prevStagAnim !== "dash") playStagCharge();
-      else if (stagAnim === "shoot" && prevStagAnim !== "shoot") playStagFireBreath();
-      else if (stagAnim === "punch" && prevStagAnim !== "punch") playStagMelee();
+      const stagDist = Math.hypot(pos.x - state2.selfPos.x, pos.y - state2.selfPos.y);
+      if (stagAnim === "dash" && prevStagAnim !== "dash") playAtDistance(playStagCharge, stagDist);
+      else if (stagAnim === "shoot" && prevStagAnim !== "shoot") playAtDistance(playStagFireBreath, stagDist);
+      else if (stagAnim === "punch" && prevStagAnim !== "punch") playAtDistance(playStagMelee, stagDist);
       lastEnemyAnim.set(id, stagAnim);
     }
   }
