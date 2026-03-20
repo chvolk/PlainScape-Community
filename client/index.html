@@ -2655,10 +2655,16 @@
 
         <hr class="menu-divider">
 
-        <label class="censor-toggle">
-          <input type="checkbox" id="censor-toggle" checked>
-          Chat profanity filter
-        </label>
+        <div style="display:flex;justify-content:center;gap:24px;">
+          <label class="censor-toggle">
+            <input type="checkbox" id="censor-toggle" checked>
+            Chat profanity filter
+          </label>
+          <label class="censor-toggle">
+            <input type="checkbox" id="audio-toggle" checked>
+            Audio
+          </label>
+        </div>
 
         <button class="htp-btn" onclick="document.getElementById('htp-modal').classList.add('open')">How to Play</button>
         <button class="controller-btn" id="open-controller-config">Configure Controller</button>

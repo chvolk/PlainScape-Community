@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.2.1",
+    "date": "2026-03-19",
+    "changes": [
+      "Sound effects added: sword swings, bow shots, lunges, dashes, shields, parries, and more",
+      "Action sounds are now server-confirmed — denied actions only play the denied sound",
+      "New metallic sword swing sound effect"
+    ]
+  },
+  {
     "version": "1.2.0",
     "date": "2026-03-18",
     "changes": [
@@ -25,18 +34,6 @@
       "Gamepad/controller support with configurable bindings (ESC menu)",
       "Hold right-click to auto-shoot arrows",
       "Performance improvements: viewport culling, snapshot caching, 15Hz tick rate"
-    ]
-  },
-  {
-    "version": "0.4.0",
-    "date": "2026-03-15",
-    "changes": [
-      "Lion rework: pounces are now dodgeable — lions commit to a direction during windup",
-      "Lions predict your movement and lead their pounces",
-      "New melee swipe attack when lions catch you by running",
-      "Lions scale speed to match your stats — no more outrunning them",
-      "Mobile support: virtual joysticks, touch controls, and landscape mode",
-      "Scorched Stag now rewards 400 Source on kill"
     ]
   }
 ]

@@ -810,6 +810,17 @@ var ScorchedStag = class _ScorchedStag extends Enemy {
       STAG_AGGRO_RANGE
     );
   }
+  toSnap() {
+    const snap = super.toSnap();
+    if (this.charging) {
+      snap.anim = "dash";
+    } else if (Date.now() - this.lastFireBreathTime < 500) {
+      snap.anim = "shoot";
+    } else if (Date.now() - this.lastMeleeTime < 300) {
+      snap.anim = "punch";
+    }
+    return snap;
+  }
 };
 
 // server/src/systems/PartySystem.ts
