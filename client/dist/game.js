@@ -7589,15 +7589,24 @@ function startGameLoop() {
     const hud = document.getElementById("hud");
     const escMenu = document.getElementById("esc-menu");
     const playBtn = document.getElementById("play-btn");
-    if (joinScreen) joinScreen.style.display = "flex";
     if (gameScreen) gameScreen.style.display = "none";
     if (hud) hud.style.display = "none";
     if (escMenu) escMenu.style.display = "none";
     if (playBtn) playBtn.disabled = false;
     input.menuOpen = false;
-    preGameNav.restart();
-    const joinForm = document.querySelector("#join-screen .join-form");
-    if (joinForm) preGameNav.activate(joinForm);
+    const browserEl = document.getElementById("server-browser");
+    if (isMainServer2 && browserEl) {
+      if (joinScreen) joinScreen.style.display = "none";
+      browserEl.style.display = "flex";
+      preGameNav.restart();
+      preGameNav.activate(browserEl);
+    } else {
+      if (browserEl) browserEl.style.display = "none";
+      if (joinScreen) joinScreen.style.display = "flex";
+      preGameNav.restart();
+      const joinForm = document.querySelector("#join-screen .join-form");
+      if (joinForm) preGameNav.activate(joinForm);
+    }
   };
   const partyBtn = document.getElementById("party-btn");
   const partyModal = document.getElementById("party-modal");
