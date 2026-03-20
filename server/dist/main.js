@@ -152,6 +152,7 @@ var SOURCE_WALK_INTERVAL = 5e3;
 var SOURCE_WALK_AMOUNT = 1;
 var SOURCE_DEATH_AMOUNT = 3;
 var SOURCE_LION_KILL_AMOUNT = 4;
+var SOURCE_CHASE_LION_KILL_AMOUNT = 2;
 var SOURCE_GHOST_KILL_AMOUNT = 4;
 var SOURCE_TRANSITION_BONUS = 2;
 var SOURCE_PLAYER_KILL_AMOUNT = 20;
@@ -745,6 +746,58 @@ var Enemy = class extends Entity {
   }
 };
 
+// server/src/entities/Lion.ts
+var Lion = class extends Enemy {
+  chaseStartTime = 0;
+  chaseLionsSpawned = 0;
+  lastChaseSpawnTime = 0;
+  isReinforcement = false;
+  flankSide = 0;
+  // 1 = right flank, -1 = left flank, 0 = head-on
+  wanderStartTime = 0;
+  // when chase lion started wandering (0 = not wandering)
+  // Pounce attack state
+  pouncing = false;
+  pouncePhase = "windup";
+  pounceStartTime = 0;
+  pounceTargetX = 0;
+  pounceTargetY = 0;
+  pounceLandTime = 0;
+  // Post-attack recovery crouch
+  crouchUntil = 0;
+  // Regular melee swipe (separate from pounce cooldown)
+  lastMeleeTime = 0;
+  constructor(x, y) {
+    super(
+      "lion",
+      x,
+      y,
+      LION_HP,
+      LION_SPEED,
+      LION_DAMAGE,
+      LION_ATTACK_RANGE,
+      LION_ATTACK_COOLDOWN,
+      LION_AGGRO_RANGE
+    );
+    this.meleeBonusDamage = LION_MELEE_BONUS;
+    this.rangedBonusDamage = LION_RANGED_BONUS;
+  }
+  toSnap() {
+    const snap = super.toSnap();
+    if (this.isReinforcement) snap.sub = "chase";
+    if (this.pouncing) {
+      if (this.pouncePhase === "windup") snap.anim = "windup";
+      else if (this.pouncePhase === "leap") snap.anim = "pounce";
+      else snap.anim = "punch";
+    } else if (this.crouchUntil > Date.now()) {
+      snap.anim = "crouch";
+    } else if (Date.now() - this.lastMeleeTime < 250) {
+      snap.anim = "punch";
+    }
+    return snap;
+  }
+};
+
 // server/src/entities/ScorchedStag.ts
 var ScorchedStag = class _ScorchedStag extends Enemy {
   lastFireBreathTime = 0;
@@ -1316,7 +1369,7 @@ function performConeAttack(world2, attacker, facing, damage, range) {
         const phase = getDayPhase();
         let killReward = SOURCE_GHOST_KILL_AMOUNT;
         if (enemy.kind === "lion") {
-          killReward = SOURCE_LION_KILL_AMOUNT;
+          killReward = enemy instanceof Lion && enemy.isReinforcement ? SOURCE_CHASE_LION_KILL_AMOUNT : SOURCE_LION_KILL_AMOUNT;
           if (phase === "dawn") killReward += SOURCE_TRANSITION_BONUS;
         } else if (enemy.kind === "ghost") {
           if (phase === "dusk") killReward += SOURCE_TRANSITION_BONUS;
@@ -1429,7 +1482,7 @@ function performLunge(world2, player, facing) {
         const lungePhase = getDayPhase();
         let lungeKillReward = SOURCE_GHOST_KILL_AMOUNT;
         if (enemy.kind === "lion") {
-          lungeKillReward = SOURCE_LION_KILL_AMOUNT;
+          lungeKillReward = enemy instanceof Lion && enemy.isReinforcement ? SOURCE_CHASE_LION_KILL_AMOUNT : SOURCE_LION_KILL_AMOUNT;
           if (lungePhase === "dawn") lungeKillReward += SOURCE_TRANSITION_BONUS;
         } else if (enemy.kind === "ghost") {
           if (lungePhase === "dusk") lungeKillReward += SOURCE_TRANSITION_BONUS;
@@ -1515,7 +1568,7 @@ function applyEnemyHit(world2, proj, enemy) {
         const phase = getDayPhase();
         let reward = SOURCE_GHOST_KILL_AMOUNT;
         if (enemy.kind === "lion") {
-          reward = SOURCE_LION_KILL_AMOUNT;
+          reward = enemy instanceof Lion && enemy.isReinforcement ? SOURCE_CHASE_LION_KILL_AMOUNT : SOURCE_LION_KILL_AMOUNT;
           if (phase === "dawn") reward += SOURCE_TRANSITION_BONUS;
         } else if (enemy.kind === "ghost") {
           if (phase === "dusk") reward += SOURCE_TRANSITION_BONUS;
@@ -1726,58 +1779,6 @@ function broadcastTurretExplosion(world2, proj) {
     message: `__fx_explode_${Math.round(proj.x)}_${Math.round(proj.y)}_turret__`
   });
 }
-
-// server/src/entities/Lion.ts
-var Lion = class extends Enemy {
-  chaseStartTime = 0;
-  chaseLionsSpawned = 0;
-  lastChaseSpawnTime = 0;
-  isReinforcement = false;
-  flankSide = 0;
-  // 1 = right flank, -1 = left flank, 0 = head-on
-  wanderStartTime = 0;
-  // when chase lion started wandering (0 = not wandering)
-  // Pounce attack state
-  pouncing = false;
-  pouncePhase = "windup";
-  pounceStartTime = 0;
-  pounceTargetX = 0;
-  pounceTargetY = 0;
-  pounceLandTime = 0;
-  // Post-attack recovery crouch
-  crouchUntil = 0;
-  // Regular melee swipe (separate from pounce cooldown)
-  lastMeleeTime = 0;
-  constructor(x, y) {
-    super(
-      "lion",
-      x,
-      y,
-      LION_HP,
-      LION_SPEED,
-      LION_DAMAGE,
-      LION_ATTACK_RANGE,
-      LION_ATTACK_COOLDOWN,
-      LION_AGGRO_RANGE
-    );
-    this.meleeBonusDamage = LION_MELEE_BONUS;
-    this.rangedBonusDamage = LION_RANGED_BONUS;
-  }
-  toSnap() {
-    const snap = super.toSnap();
-    if (this.isReinforcement) snap.sub = "chase";
-    if (this.pouncing) {
-      if (this.pouncePhase === "windup") snap.anim = "windup";
-      else if (this.pouncePhase === "leap") snap.anim = "pounce";
-      else snap.anim = "punch";
-    } else if (this.crouchUntil > Date.now()) {
-      snap.anim = "crouch";
-    } else if (Date.now() - this.lastMeleeTime < 250) {
-      snap.anim = "punch";
-    }
-    return snap;
-  }
-};
 
 // server/src/entities/Ghost.ts
 var Ghost = class extends Enemy {
@@ -2084,7 +2085,8 @@ function tickLion(world2, lion, target, dist, delta) {
             if (lion.hp <= 0) {
               lion.markedForRemoval = true;
               world2.suppressSpawnsAt(lion.x, lion.y);
-              const lionReward = SOURCE_LION_KILL_AMOUNT + (getDayPhase() === "dawn" ? SOURCE_TRANSITION_BONUS : 0) + distanceBonus(player.x, player.y);
+              const baseLionReward = lion.isReinforcement ? SOURCE_CHASE_LION_KILL_AMOUNT : SOURCE_LION_KILL_AMOUNT;
+              const lionReward = baseLionReward + (getDayPhase() === "dawn" ? SOURCE_TRANSITION_BONUS : 0) + distanceBonus(player.x, player.y);
               awardSource(player, lionReward, world2);
               world2.sendEvent(player, "kill", `You killed a lion! +${lionReward} Source`);
               world2.broadcastAll({
@@ -2172,6 +2174,8 @@ function tickLion(world2, lion, target, dist, delta) {
       if (Math.hypot(sx, sy) > SAFE_ZONE_RADIUS && !isInsideBuilding(sx, sy, world2)) {
         const reinforcement = new Lion(sx, sy);
         reinforcement.isReinforcement = true;
+        reinforcement.hp = 3;
+        reinforcement.maxHp = 3;
         if (flankLeft <= flankRight && flankLeft <= flankHead) {
           reinforcement.flankSide = -1;
         } else if (flankRight <= flankLeft && flankRight <= flankHead) {
@@ -2220,7 +2224,8 @@ function tickLion(world2, lion, target, dist, delta) {
         if (nearPlayer.parryActive) {
           lion.hp -= lion.damage * PARRY_REFLECT_MULT;
           if (lion.hp <= 0) {
-            const parryLionReward = SOURCE_LION_KILL_AMOUNT + (getDayPhase() === "dawn" ? SOURCE_TRANSITION_BONUS : 0) + distanceBonus(nearPlayer.x, nearPlayer.y);
+            const baseParryReward = lion.isReinforcement ? SOURCE_CHASE_LION_KILL_AMOUNT : SOURCE_LION_KILL_AMOUNT;
+            const parryLionReward = baseParryReward + (getDayPhase() === "dawn" ? SOURCE_TRANSITION_BONUS : 0) + distanceBonus(nearPlayer.x, nearPlayer.y);
             awardSource(nearPlayer, parryLionReward, world2);
             world2.sendEvent(nearPlayer, "kill", `You killed a lion! +${parryLionReward} Source`);
             lion.markedForRemoval = true;
